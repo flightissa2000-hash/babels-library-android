@@ -235,12 +235,31 @@ function applyTheme() {
   if (!BLAYOUTS.some((b) => b[0] === S.blayout)) S.blayout = "standard";
   document.documentElement.classList.toggle("tabs-off", !!S.tabsOff);
   document.body.classList.remove("nav-open");
+  placeNub();
   if (A && A.setBrowserTheme) {          // the browser screen is native: tell it the theme's colours (and the browser's layout)
     const cs = getComputedStyle(document.documentElement), c = (v) => cs.getPropertyValue(v).trim();
     A.setBrowserTheme(JSON.stringify({ theme: document.documentElement.dataset.theme, layout: S.blayout, bg: c("--bg"), surface: c("--surface"), ink: c("--ink"), soft: c("--ink-soft"),
       line: c("--line"), accent: c("--accent"), accentInk: c("--accent-ink"), accent2: c("--accent2") }));
   }
 }
+/* the orange tab (tabs hidden): see-through, and dragged up or down out of the way; its height is kept (S.nubY, a
+   fraction of the screen) and the browser's copy of it sits at the same height */
+function placeNub() { document.documentElement.style.setProperty("--nub-y", ((S.nubY || 0.5) * 100).toFixed(2) + "%"); }
+window.Native.nubMoved = (f) => { S.nubY = Math.max(0.06, Math.min(0.94, Number(f) || 0.5)); placeNub(); saveState(); };
+(() => {
+  let y0 = null, f0 = 0, moved = false;
+  document.addEventListener("pointerdown", (e) => { if (!e.target.closest("#navNub")) return; y0 = e.clientY; f0 = S.nubY || 0.5; moved = false; }, true);
+  document.addEventListener("pointermove", (e) => {
+    if (y0 === null) return;
+    if (!moved && Math.abs(e.clientY - y0) < 8) return;
+    moved = true;
+    S.nubY = Math.max(0.06, Math.min(0.94, f0 + (e.clientY - y0) / innerHeight));
+    placeNub();
+  }, true);
+  document.addEventListener("pointerup", () => { if (y0 !== null && moved) saveState(); y0 = null; }, true);
+  // a drag isn't a tap: the tabs stay hidden
+  document.addEventListener("click", (e) => { if (moved && e.target.closest("#navNub")) { e.stopImmediatePropagation(); e.preventDefault(); moved = false; } }, true);
+})();
 /* full screen: the tabs tuck away; the nub on the right edge (or a swipe in from it) brings them back */
 function tabsOff(off) {
   setTimeout(placeBrowser, 320);           // (the browser gets the room the tabs leave, or gives it back)
@@ -586,9 +605,10 @@ function browserRect() {
   let top = 0, right = innerWidth;
   if (document.documentElement.dataset.nav === "drawer") top = Math.round($(".top").getBoundingClientRect().bottom);     // (☰ stays reachable)
   else if (!S.tabsOff) right = Math.round($("#tabs").getBoundingClientRect().left) || innerWidth;
-  else right = innerWidth - 24;                                     // (the edge the tabs swipe back in from)
   const cut = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--cut")) || 0;      // (the camera hole)
-  return { x: 0, y: top, w: right, h: innerHeight - top, cut };
+  // tabs hidden: the page has the whole width, and the orange tab floats over it (drawn by the phone, at the same height)
+  const nub = !!S.tabsOff;
+  return { x: 0, y: top, w: right, h: innerHeight - top, cut, nub, nubY: S.nubY || 0.5 };
 }
 function placeBrowser() {
   const o = browserPage();

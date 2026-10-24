@@ -77,6 +77,7 @@ public class MainActivity extends Activity {
     private LocalServer media;
     private android.widget.FrameLayout screen;          // the app's page, with the browser laid over its Browser tab
     private BrowserPanel browser;                        // the browser's one tab: kept while you're elsewhere in the app
+    private android.widget.TextView nub;                // the orange tab over a full-width browser (the app's tabs hidden)
 
     static File libraryDir(Context c) {
         File d = c.getExternalFilesDir("library");
@@ -171,10 +172,71 @@ public class MainActivity extends Activity {
             browserCut = lp.topMargin == 0 ? Math.round((float) r.optDouble("cut", 0) * d) : 0;
             browser.topInset(browserCut);
             browser.view().setVisibility(View.VISIBLE);
+            if (r.optBoolean("nub")) showNub((float) r.optDouble("nubY", 0.5)); else hideNub();
         } catch (Exception ignored) { }
     }
+    /** The app's tabs are hidden: the browser has the whole width, and the orange tab floats over it (see-through, so
+     *  the page shows under it). Drag it up or down to move it out of the way; tap it for the tabs. */
+    private void showNub(float frac) {
+        float d = getResources().getDisplayMetrics().density;
+        int w = Math.round(30 * d), h = Math.round(68 * d);
+        if (nub == null) {
+            nub = new android.widget.TextView(this);
+            nub.setGravity(android.view.Gravity.CENTER);
+            nub.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+            nub.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            nub.setText("‹\n◍");
+            nub.setContentDescription("Show the app's tabs");
+            nub.setElevation(6 * d);
+            nub.setOnTouchListener(new View.OnTouchListener() {
+                float y0; int top0; boolean moved;
+                @Override public boolean onTouch(View v, android.view.MotionEvent e) {
+                    android.widget.FrameLayout.LayoutParams lp = (android.widget.FrameLayout.LayoutParams) v.getLayoutParams();
+                    switch (e.getActionMasked()) {
+                        case android.view.MotionEvent.ACTION_DOWN: y0 = e.getRawY(); top0 = lp.topMargin; moved = false; v.setAlpha(1f); return true;
+                        case android.view.MotionEvent.ACTION_MOVE:
+                            if (!moved && Math.abs(e.getRawY() - y0) < 8 * d) return true;
+                            moved = true;
+                            lp.topMargin = Math.max(0, Math.min(screen.getHeight() - v.getHeight(), top0 + Math.round(e.getRawY() - y0)));
+                            v.setLayoutParams(lp);
+                            return true;
+                        case android.view.MotionEvent.ACTION_UP:
+                            v.setAlpha(.72f);
+                            if (moved) js("window.Native && Native.nubMoved && Native.nubMoved(" + ((lp.topMargin + v.getHeight() / 2f) / Math.max(1, screen.getHeight())) + ")");
+                            else js("window.tabsOff && tabsOff(false)");
+                            return true;
+                        case android.view.MotionEvent.ACTION_CANCEL: v.setAlpha(.72f); return true;
+                    }
+                    return false;
+                }
+            });
+            screen.addView(nub, new android.widget.FrameLayout.LayoutParams(w, h, android.view.Gravity.END | android.view.Gravity.TOP));
+        }
+        // in the theme's accent (from the colours the page gave the browser)
+        int accent = 0xFFFF6B4A, ink = 0xFFFFFFFF;
+        try {
+            JSONObject t = new JSONObject(getSharedPreferences("browser", MODE_PRIVATE).getString("theme", "{}"));
+            if (!t.optString("accent").isEmpty()) accent = android.graphics.Color.parseColor(t.optString("accent").trim());
+            if (!t.optString("accentInk").isEmpty()) ink = android.graphics.Color.parseColor(t.optString("accentInk").trim());
+        } catch (Exception ignored) { }
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(accent);
+        bg.setCornerRadii(new float[]{14 * d, 14 * d, 0, 0, 0, 0, 14 * d, 14 * d});
+        nub.setBackground(bg);
+        nub.setTextColor(ink);
+        nub.setAlpha(.72f);
+        android.widget.FrameLayout.LayoutParams lp = (android.widget.FrameLayout.LayoutParams) nub.getLayoutParams();
+        int H = screen.getHeight() > 0 ? screen.getHeight() : getResources().getDisplayMetrics().heightPixels;
+        lp.topMargin = Math.max(0, Math.min(H - h, Math.round(frac * H - h / 2f)));
+        nub.setLayoutParams(lp);
+        nub.setVisibility(View.VISIBLE);
+        nub.bringToFront();
+    }
+    private void hideNub() { if (nub != null) nub.setVisibility(View.GONE); }
+
     /** ✕ on the browser's last page: the tab is closed; the Browser tab shows its start page */
     private void closeBrowser() {
+        hideNub();
         if (browser == null) return;
         browser.destroy();
         browser = null;
@@ -198,6 +260,7 @@ public class MainActivity extends Activity {
         browser.view().setVisibility(shown ? View.VISIBLE : View.INVISIBLE);
         browser.topInset(browserCut);
         screen.addView(browser.view(), lp);
+        if (nub != null) nub.bringToFront();
     }
     /** from a notification: a News event's page, or back to what's playing in the browser */
     private void fromNotification(Intent i) {
@@ -842,7 +905,7 @@ public class MainActivity extends Activity {
 
         /** Another tab: the browser is put out of sight, its page kept (what's playing carries on). */
         @JavascriptInterface
-        public void browserHide() { runOnUiThread(() -> { if (browser != null) browser.view().setVisibility(View.INVISIBLE); }); }
+        public void browserHide() { runOnUiThread(() -> { if (browser != null) browser.view().setVisibility(View.INVISIBLE); hideNub(); }); }
 
         /** The page left open in the browser ({url, title}), or "" when there isn't one. */
         @JavascriptInterface
