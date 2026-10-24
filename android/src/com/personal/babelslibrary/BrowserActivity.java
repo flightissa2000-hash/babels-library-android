@@ -2,6 +2,7 @@ package com.personal.babelslibrary;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.net.Uri;
@@ -160,6 +161,8 @@ public class BrowserActivity extends Activity {
     }
 
     private Button wikiBtn, reloadBtn, closeBtn, saveBtn, starBtn, keyBtn;
+    private android.widget.TextView leaveBtn;      // ‹ Library: back to the app, the page stays open here
+    static volatile boolean alive = false;
     private boolean wikiNext = false;   // W pressed with nothing typed: the next search goes to Wikipedia
     private android.widget.TextView clock, where;
     private LinearLayout rootView, barRow;
@@ -247,6 +250,7 @@ public class BrowserActivity extends Activity {
             progress.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(dark));
         }
         layoutName = t.optString("layout", "standard");
+        paintLeave();
     }
 
     @Override
@@ -271,6 +275,16 @@ public class BrowserActivity extends Activity {
         where.setSingleLine(true);
         where.setEllipsize(android.text.TextUtils.TruncateAt.END);
         where.setGravity(Gravity.END);
+        leaveBtn = new android.widget.TextView(this);
+        leaveBtn.setText("‹ Library");
+        leaveBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        leaveBtn.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        leaveBtn.setPadding(dp(10), dp(4), dp(12), dp(4));
+        leaveBtn.setContentDescription("Back to the library (the page stays open)");
+        leaveBtn.setOnClickListener(v -> leave());
+        LinearLayout.LayoutParams lbp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lbp.setMargins(0, 0, dp(10), 0);
+        top.addView(leaveBtn, lbp);
         top.addView(clock);
         top.addView(where, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         LinearLayout bar = new LinearLayout(this);
@@ -347,8 +361,38 @@ public class BrowserActivity extends Activity {
             try (java.io.InputStream in = getAssets().open("web/yt_adblock.js")) { ytJs = new String(Net.readAll(in), StandardCharsets.UTF_8); }
             catch (Exception e) { ytJs = ""; }
         }).start();
+        alive = true;
+        paintLeave();
         String start = getIntent().getStringExtra(EXTRA_URL);
+        // nothing asked for: the page that was open when you left (if Android closed the browser meanwhile)
+        if (start == null || start.isEmpty()) start = getSharedPreferences("browser", MODE_PRIVATE).getString("open_url", "");
         go(start == null ? "" : start);
+    }
+
+    /** ‹ Library in the top line, in the colours of the clock beside it */
+    private void paintLeave() {
+        if (leaveBtn == null) return;
+        int ink = clock.getCurrentTextColor();
+        leaveBtn.setTextColor(ink);
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+        g.setCornerRadius(dp(14));
+        g.setColor((ink & 0x00FFFFFF) | 0x22000000);
+        g.setStroke(dp(1), (ink & 0x00FFFFFF) | 0x66000000);
+        leaveBtn.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x44000000), g, null));
+    }
+
+    /** Back to the app with the page left open (the browser runs as its own task, so it's kept): the Browser tab,
+     *  or a link, brings you back to it. */
+    private void leave() {
+        startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+    }
+
+    @Override
+    protected void onNewIntent(Intent i) {
+        super.onNewIntent(i);
+        setIntent(i);
+        String u = i.getStringExtra(EXTRA_URL);
+        if (u != null && !u.isEmpty()) go(u);             // a link or search from the app: open it here (the page you had is in Back)
     }
 
     /* ---------------- layouts (🧭 on the Browser tab): where the controls live ----------------
@@ -424,6 +468,7 @@ public class BrowserActivity extends Activity {
                 rootView.setBackground(new android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, cab));
                 topLine.setBackgroundColor(0x00000000);
                 clock.setTextColor(wt ? 0xFF22304A : 0xFFF3E7C4);
+                paintLeave();
                 where.setTextColor(ink);
                 android.widget.FrameLayout screen = new android.widget.FrameLayout(this);
                 android.graphics.drawable.GradientDrawable bezel = new android.graphics.drawable.GradientDrawable();
@@ -752,6 +797,8 @@ public class BrowserActivity extends Activity {
         fwdBtn.setEnabled(web.canGoForward());
         String h = url.startsWith("http") ? current.get(web) : null;
         where.setText(h == null ? "" : h.replaceFirst("^www\\.", ""));
+        if (url.startsWith("http") && webB == null)       // (remembered: the page comes back if Android closes the browser while you're away)
+            getSharedPreferences("browser", MODE_PRIVATE).edit().putString("open_url", url).putString("open_title", web.getTitle() == null ? "" : web.getTitle()).apply();
         progress.setProgress(web.getProgress());
         progress.setVisibility(web.getProgress() >= 100 ? View.INVISIBLE : View.VISIBLE);
         // ☆/★: is this page bookmarked? 🔑: only shows on a site you have a saved password for
@@ -770,6 +817,8 @@ public class BrowserActivity extends Activity {
     private void closeTab() {
         if (webB != null) { setActive(web == webA ? webB : webA); split(); return; }
         toStart = true;
+        getSharedPreferences("browser", MODE_PRIVATE).edit().remove("open_url").remove("open_title").apply();
+        leave();
         finish();
     }
 
@@ -1137,11 +1186,12 @@ public class BrowserActivity extends Activity {
     public void onBackPressed() {
         if (fullView != null) { hideFull(); return; }                 // back leaves full screen first
         if (fanOpen) { fan(false); return; }                           // then folds the orb's fan
-        if (web.canGoBack()) web.goBack(); else super.onBackPressed();
+        if (web.canGoBack()) web.goBack(); else leave();          // (Back past the first page leaves; the tab stays open)
     }
 
     @Override
     protected void onDestroy() {
+        alive = false;
         ui.removeCallbacks(tick);
         ui.removeCallbacks(watchMedia);
         PlaybackService.stop(this);

@@ -1110,3 +1110,10 @@ html[data-nav=folders] .hw-swap{--tabs-w:46px}
 .up-next .un-c{font-size:.8rem;color:#ccc}
 .up-next .btns{display:flex;gap:6px;margin-top:4px}
 .r-media::cue{background:rgba(0,0,0,.65);font-size:1.05em}
+/* the Browser tab: the page left open in the browser */
+.bw-resume{display:flex;align-items:center;gap:12px;width:100%;margin:6px 0 14px;padding:12px 14px;text-align:left;border-radius:var(--radius,16px);border:var(--card-border,2px solid var(--line));background:color-mix(in srgb,var(--accent) 14%,var(--surface));color:var(--ink);box-shadow:var(--btn-shadow,0 6px 16px rgba(0,0,0,.18))}
+.bw-resume-ic{flex:none;display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:var(--accent);color:var(--accent-ink,#fff);font:900 1.3rem/1 var(--font-ui,sans-serif)}
+.bw-resume .t{display:flex;flex-direction:column;min-width:0}
+.bw-resume small{font:800 .66rem var(--font-ui,sans-serif);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft)}
+.bw-resume b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bw-resume em{font-style:normal;font-size:.74rem;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

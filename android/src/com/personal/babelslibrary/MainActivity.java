@@ -762,7 +762,17 @@ public class MainActivity extends Activity {
         public void openBrowser(String url) {
             Intent i = new Intent(MainActivity.this, BrowserActivity.class);
             i.putExtra(BrowserActivity.EXTRA_URL, url == null ? "" : url);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);         // (its own task: an open page waits there while you're in the app)
             runOnUiThread(() -> startActivity(i));
+        }
+
+        /** The page left open in the browser ({url, title}), or "" when there isn't one. */
+        @JavascriptInterface
+        public String browserOpen() {
+            android.content.SharedPreferences p = getSharedPreferences("browser", MODE_PRIVATE);
+            String u = p.getString("open_url", "");
+            if (u.isEmpty()) return "";
+            try { return new JSONObject().put("url", u).put("title", p.getString("open_title", "")).put("alive", BrowserActivity.alive).toString(); } catch (Exception e) { return ""; }
         }
 
         /** The page's theme colours, for the browser screen's bar (it's native, so it can't read the CSS). */
