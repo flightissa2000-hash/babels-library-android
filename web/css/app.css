@@ -1117,3 +1117,5 @@ html[data-nav=folders] .hw-swap{--tabs-w:46px}
 .bw-resume small{font:800 .66rem var(--font-ui,sans-serif);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft)}
 .bw-resume b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bw-resume em{font-style:normal;font-size:.74rem;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the Browser tab while a page is open: the browser itself is laid over this space */
+.bw-hole{position:absolute;inset:0;background:var(--bg)}

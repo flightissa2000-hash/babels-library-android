@@ -40,12 +40,45 @@ import java.util.Set;
 import java.util.zip.GZIPInputStream;
 
 /**
- * The phone's browser: one tab, its own bar (back, forward, reload, address or search, close), ads and trackers
+ * The phone's browser, inside the app's own screen (on the Browser tab, beside the app's tabs): one tab, its own bar (back, forward, reload, address or search, close), ads and trackers
  * blocked with the computer's block lists, pop-ups refused, and every page kept in history (browser_history.json,
  * shown on the app's Browser tab). Passwords are Android's job: its autofill service (Google Password Manager,
  * Samsung Pass...) offers and fills them in here like in any app.
  */
-public class BrowserActivity extends Activity {
+public class BrowserPanel extends android.content.ContextWrapper {
+    private final Activity act;                          // the app's screen it lives in
+    private final android.widget.FrameLayout screen;     // the whole screen (a full-screen video goes here)
+    Runnable onClosed;                                   // ✕ on the last page: the app shows the Browser tab's start page
+
+    /** The browser, opening a page (or the page you had, from saved): add view() to the screen. */
+    BrowserPanel(Activity act, android.widget.FrameLayout screen, String url, Bundle saved) {
+        super(act);
+        this.act = act;
+        this.screen = screen;
+        build(url, saved);
+        onResume();
+    }
+    View view() { return stage; }
+    // (kept as plain text: the app asks from its own thread, and a WebView only answers on the UI thread)
+    private volatile String curUrl = "", curTitle = "";
+    String url() { return curUrl; }
+    String title() { return curTitle; }
+    /** a link or search from the app: opens here (the page you had is in Back) */
+    void open(String url) { if (url != null && !url.isEmpty()) go(url); }
+    /** the page and its Back history, to carry on in a new panel (a new layout or theme) */
+    Bundle save() { Bundle b = new Bundle(); if (webA != null) webA.saveState(b); return b; }
+    /** room for the camera hole when the browser reaches the top of the screen */
+    void topInset(int px) { if (topLine != null) topLine.setPadding(dp(16), px + dp(6), dp(16), 0); }
+
+    // (what the screen did for it when it was a screen of its own)
+    private void runOnUiThread(Runnable r) { act.runOnUiThread(r); }
+    private android.view.Window getWindow() { return act.getWindow(); }
+    private void setRequestedOrientation(int o) { act.setRequestedOrientation(o); }
+    private <T extends View> T findViewById(int id) { return act.findViewById(id); }
+    private void requestPermissions(String[] p, int code) { act.requestPermissions(p, code); }
+    private boolean closed = false;
+    private boolean isFinishing() { return closed; }
+
     static final String EXTRA_URL = "url";
     private static final Object LOCK = new Object();
     private static volatile Set<String> blocked = null;   // ad and tracker sites (from the computer)
@@ -162,7 +195,6 @@ public class BrowserActivity extends Activity {
 
     private Button wikiBtn, reloadBtn, closeBtn, saveBtn, starBtn, keyBtn;
     private android.widget.TextView leaveBtn;      // ‹ Library: back to the app, the page stays open here
-    static volatile boolean alive = false;
     private boolean wikiNext = false;   // W pressed with nothing typed: the next search goes to Wikipedia
     private android.widget.TextView clock, where;
     private LinearLayout rootView, barRow;
@@ -253,9 +285,7 @@ public class BrowserActivity extends Activity {
         paintLeave();
     }
 
-    @Override
-    protected void onCreate(Bundle state) {
-        super.onCreate(state);
+    private void build(String startUrl, Bundle saved) {
         new Thread(() -> loadBlocklist(this)).start();
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -281,10 +311,11 @@ public class BrowserActivity extends Activity {
         leaveBtn.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         leaveBtn.setPadding(dp(10), dp(4), dp(12), dp(4));
         leaveBtn.setContentDescription("Back to the library (the page stays open)");
-        leaveBtn.setOnClickListener(v -> leave());
+        leaveBtn.setOnClickListener(v -> { });
         LinearLayout.LayoutParams lbp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lbp.setMargins(0, 0, dp(10), 0);
         top.addView(leaveBtn, lbp);
+        leaveBtn.setVisibility(View.GONE);             // (the app's own tabs are beside the browser now)
         top.addView(clock);
         top.addView(where, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         LinearLayout bar = new LinearLayout(this);
@@ -316,7 +347,15 @@ public class BrowserActivity extends Activity {
         address.setBackground(pill);
         address.setPadding(dp(14), dp(8), dp(14), dp(8));
         address.setSelectAllOnFocus(true);
-        address.setOnFocusChangeListener((v, has) -> editing = has);
+        // typing: the box takes the room of the buttons you don't need then (in the bar layouts), and shows the whole
+        // address; otherwise it shows it short (no https://), as the room beside the app's tabs is narrow
+        address.setOnFocusChangeListener((v, has) -> {
+            editing = has;
+            if ("standard".equals(layoutName) || "bottom".equals(layoutName))
+                for (Button b : new Button[]{starBtn, splitBtn, saveBtn, reloadBtn}) b.setVisibility(has ? View.GONE : View.VISIBLE);
+            if (has) { String u = web.getUrl() == null ? "" : web.getUrl(); if (u.startsWith("http")) { address.setText(u); address.selectAll(); } }
+            else refreshBar();
+        });
         address.setOnEditorActionListener((v, id, ev) -> {
             if (id == EditorInfo.IME_ACTION_GO || (ev != null && ev.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
                 if (ev == null || ev.getAction() == KeyEvent.ACTION_DOWN) go(address.getText().toString());   // once, not on key-up too
@@ -354,17 +393,17 @@ public class BrowserActivity extends Activity {
         root.addView(panes, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
         stage = new android.widget.FrameLayout(this);
         stage.addView(root, new android.widget.FrameLayout.LayoutParams(-1, -1));
-        setContentView(stage);
         arrange(layoutName);
         new Thread(() -> {
             if (ytJs != null) return;
             try (java.io.InputStream in = getAssets().open("web/yt_adblock.js")) { ytJs = new String(Net.readAll(in), StandardCharsets.UTF_8); }
             catch (Exception e) { ytJs = ""; }
         }).start();
-        alive = true;
         paintLeave();
-        String start = getIntent().getStringExtra(EXTRA_URL);
-        // nothing asked for: the page that was open when you left (if Android closed the browser meanwhile)
+        // carrying on (a new layout or theme): the same page with its Back history; else the page asked for, or the
+        // page that was open when the app was last closed
+        if (saved != null && webA.restoreState(saved) != null) { refreshBar(); return; }
+        String start = startUrl;
         if (start == null || start.isEmpty()) start = getSharedPreferences("browser", MODE_PRIVATE).getString("open_url", "");
         go(start == null ? "" : start);
     }
@@ -381,19 +420,6 @@ public class BrowserActivity extends Activity {
         leaveBtn.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x44000000), g, null));
     }
 
-    /** Back to the app with the page left open (the browser runs as its own task, so it's kept): the Browser tab,
-     *  or a link, brings you back to it. */
-    private void leave() {
-        startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
-    }
-
-    @Override
-    protected void onNewIntent(Intent i) {
-        super.onNewIntent(i);
-        setIntent(i);
-        String u = i.getStringExtra(EXTRA_URL);
-        if (u != null && !u.isEmpty()) go(u);             // a link or search from the app: open it here (the page you had is in Back)
-    }
 
     /* ---------------- layouts (🧭 on the Browser tab): where the controls live ----------------
        standard: the bar on top · bottom: the bar at the bottom, by your thumb · rail: the address on top, the buttons
@@ -662,16 +688,16 @@ public class BrowserActivity extends Activity {
         fullView = v;
         fullDone = cb;
         v.setBackgroundColor(0xFF000000);
-        stage.addView(v, new android.widget.FrameLayout.LayoutParams(-1, -1));
+        screen.addView(v, new android.widget.FrameLayout.LayoutParams(-1, -1));       // (the whole screen, over the app too)
         rootView.setVisibility(View.INVISIBLE);
         if (orbBtn != null) orbBtn.setVisibility(View.INVISIBLE);
         setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);   // (sideways, either way round, like a video app)
-        MainActivity.fullScreen(this);
+        MainActivity.fullScreen(act);
         bars(false);
     }
     private void hideFull() {
         if (fullView == null) return;
-        stage.removeView(fullView);
+        screen.removeView(fullView);
         fullView = null;
         rootView.setVisibility(View.VISIBLE);
         if (orbBtn != null) orbBtn.setVisibility(View.VISIBLE);
@@ -718,8 +744,8 @@ public class BrowserActivity extends Activity {
             + "const stop=e=>e.stopImmediatePropagation();for(const t of ['visibilitychange','webkitvisibilitychange'])document.addEventListener(t,stop,true);"
             + "for(const t of ['pagehide','blur','freeze'])window.addEventListener(t,stop,true);})()";
     private static final String PLAYING_JS = "[...document.querySelectorAll('video,audio')].some(m=>!m.paused&&!m.ended&&m.readyState>2)";
-    private static java.lang.ref.WeakReference<BrowserActivity> live = new java.lang.ref.WeakReference<>(null);
-    static BrowserActivity current() { return live.get(); }
+    private static java.lang.ref.WeakReference<BrowserPanel> live = new java.lang.ref.WeakReference<>(null);
+    static BrowserPanel current() { return live.get(); }
 
     /** Stop (from the playing notification): pause whatever is playing, in both halves. */
     void pauseMedia() {
@@ -746,7 +772,7 @@ public class BrowserActivity extends Activity {
                     if (any[0]) getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                     else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                     if (any[0] && !keeping && resumed) {
-                        try { PlaybackService.start(BrowserActivity.this, w.getTitle()); keeping = true; } catch (Exception ignored) { }
+                        try { PlaybackService.start(BrowserPanel.this, w.getTitle()); keeping = true; } catch (Exception ignored) { }
                         // (its notification, with Stop, needs permission to show on Android 13+: asked once)
                         if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
                                 && !getSharedPreferences("browser", MODE_PRIVATE).getBoolean("askedNotify", false)) {
@@ -754,7 +780,7 @@ public class BrowserActivity extends Activity {
                             requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 11);
                         }
                     } else if (!any[0] && keeping) {
-                        PlaybackService.stop(BrowserActivity.this);
+                        PlaybackService.stop(BrowserPanel.this);
                         keeping = false;
                     }
                 });
@@ -763,11 +789,7 @@ public class BrowserActivity extends Activity {
         }
     };
 
-    @Override
-    protected void onPause() {
-        resumed = false;
-        super.onPause();
-    }
+    void onPause() { resumed = false; }
 
     private static boolean isYouTube(String host) { return host != null && host.matches("(?i)(.*\\.)?youtube(-nocookie)?\\.com"); }
 
@@ -791,12 +813,13 @@ public class BrowserActivity extends Activity {
 
     private void refreshBar() {
         String url = web.getUrl() == null ? "" : web.getUrl();
-        if (!editing) address.setText(url.startsWith("http") ? url : "");
+        if (!editing) address.setText(url.startsWith("http") ? url.replaceFirst("^https?://(www\\.)?", "") : "");
         backBtn.setEnabled(web.canGoBack());
         backBtn.setAlpha(web.canGoBack() ? 1f : 0.4f);
         fwdBtn.setEnabled(web.canGoForward());
         String h = url.startsWith("http") ? current.get(web) : null;
         where.setText(h == null ? "" : h.replaceFirst("^www\\.", ""));
+        if (web == webA) { curUrl = url; curTitle = web.getTitle() == null ? "" : web.getTitle(); }
         if (url.startsWith("http") && webB == null)       // (remembered: the page comes back if Android closes the browser while you're away)
             getSharedPreferences("browser", MODE_PRIVATE).edit().putString("open_url", url).putString("open_title", web.getTitle() == null ? "" : web.getTitle()).apply();
         progress.setProgress(web.getProgress());
@@ -813,13 +836,10 @@ public class BrowserActivity extends Activity {
 
     /** ✕: close the page you're on. In split view just that half (the other one stays); otherwise back to the
      *  browser's start page (the app's Browser tab), not wherever the browser was opened from. */
-    static volatile boolean toStart = false;
     private void closeTab() {
         if (webB != null) { setActive(web == webA ? webB : webA); split(); return; }
-        toStart = true;
         getSharedPreferences("browser", MODE_PRIVATE).edit().remove("open_url").remove("open_title").apply();
-        leave();
-        finish();
+        if (onClosed != null) onClosed.run();
     }
 
     /* ---------------- bookmarks: shared with the computer (its list is the real one; a copy is kept here for offline) */
@@ -881,7 +901,7 @@ public class BrowserActivity extends Activity {
         if (list.size() == 1) { fill(list.get(0)); return; }
         String[] names = new String[list.size()];
         for (int i = 0; i < names.length; i++) names[i] = list.get(i).user.isEmpty() ? "(no username)" : list.get(i).user;
-        new android.app.AlertDialog.Builder(this).setTitle("Sign in as").setItems(names, (d, i) -> fill(list.get(i))).show();
+        new android.app.AlertDialog.Builder(act).setTitle("Sign in as").setItems(names, (d, i) -> fill(list.get(i))).show();
     }
     private static final String FILL_JS = "((u,p)=>{const vis=e=>e&&e.offsetParent!==null&&!e.disabled;const set=(e,v)=>{const s=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;s.call(e,v);"
             + "e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}))};"
@@ -995,7 +1015,7 @@ public class BrowserActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(true);
         CookieManager.getInstance().setAcceptCookie(true);
         web.setWebChromeClient(new WebChromeClient() {
-            @Override public void onProgressChanged(WebView v, int p) { if (v != BrowserActivity.this.web) return; progress.setProgress(p); progress.setVisibility(p >= 100 ? View.INVISIBLE : View.VISIBLE); }
+            @Override public void onProgressChanged(WebView v, int p) { if (v != BrowserPanel.this.web) return; progress.setProgress(p); progress.setVisibility(p >= 100 ? View.INVISIBLE : View.VISIBLE); }
             @Override public void onReceivedTitle(WebView v, String title) { remember(v.getUrl(), title); }
             @Override public void onShowCustomView(View view, CustomViewCallback cb) { showFull(view, cb); }
             @Override public void onHideCustomView() { hideFull(); }
@@ -1029,14 +1049,14 @@ public class BrowserActivity extends Activity {
                 current.put(v, h);
                 going.put(v, h);
                 ytAds(v, url);
-                if (v == BrowserActivity.this.web) refreshBar();
+                if (v == BrowserPanel.this.web) refreshBar();
             }
 
             @Override
             public void onPageFinished(WebView v, String url) {
                 if (!hideJs.isEmpty()) v.evaluateJavascript(hideJs, null);   // the empty boxes ads leave behind
                 ytAds(v, url);
-                if (v == BrowserActivity.this.web) refreshBar();
+                if (v == BrowserPanel.this.web) refreshBar();
                 remember(url, v.getTitle());
             }
         });
@@ -1047,7 +1067,7 @@ public class BrowserActivity extends Activity {
     private final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
         @Override public void run() {
-            clock.setText(android.text.format.DateFormat.getTimeFormat(BrowserActivity.this).format(new java.util.Date()));
+            clock.setText(android.text.format.DateFormat.getTimeFormat(BrowserPanel.this).format(new java.util.Date()));
             ui.postDelayed(this, 10000);
         }
     };
@@ -1072,7 +1092,7 @@ public class BrowserActivity extends Activity {
         String url = web.getUrl();
         if (url == null || !url.startsWith("http")) { toast("Open an article first"); return; }
         String t = web.getTitle();
-        new android.app.AlertDialog.Builder(this)
+        new android.app.AlertDialog.Builder(act)
                 .setTitle("Keep this page?")
                 .setMessage((t == null || t.isEmpty() ? url : t) + "\n\nSave it in your library for good, or for 30 days? (You'll be asked before it's removed.)")
                 .setPositiveButton("For good", (d, w) -> savePage(url, 0))
@@ -1109,24 +1129,11 @@ public class BrowserActivity extends Activity {
 
     private void toast(String s) { android.widget.Toast.makeText(this, s, android.widget.Toast.LENGTH_LONG).show(); }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
+    void onResume() {
         live = new java.lang.ref.WeakReference<>(this);
         resumed = true;
         ui.removeCallbacks(watchMedia);
         ui.post(watchMedia);
-        MainActivity.fullScreen(this);
-    }
-
-    @Override
-    public void onWindowFocusChanged(boolean has) {
-        super.onWindowFocusChanged(has);
-        if (!has || topLine == null) return;
-        int cut = 0;
-        android.view.WindowInsets in = getWindow().getDecorView().getRootWindowInsets();
-        if (in != null && in.getDisplayCutout() != null) cut = in.getDisplayCutout().getSafeInsetTop();
-        topLine.setPadding(dp(16), cut + dp(6), dp(16), 0);
     }
 
     /** An address, or words to search for on DuckDuckGo (or Wikipedia, after W). */
@@ -1181,22 +1188,24 @@ public class BrowserActivity extends Activity {
         }
     }
 
-    @Override
-    @SuppressWarnings("deprecation")
-    public void onBackPressed() {
-        if (fullView != null) { hideFull(); return; }                 // back leaves full screen first
-        if (fanOpen) { fan(false); return; }                           // then folds the orb's fan
-        if (web.canGoBack()) web.goBack(); else leave();          // (Back past the first page leaves; the tab stays open)
+    /** Back: leaves full screen, folds the orb's fan, or goes back a page; false when there's nowhere to go back to
+     *  (the app then goes back itself, leaving this page open on the Browser tab). */
+    boolean back() {
+        if (fullView != null) { hideFull(); return true; }
+        if (fanOpen) { fan(false); return true; }
+        if (web.canGoBack()) { web.goBack(); return true; }
+        return false;
     }
 
-    @Override
-    protected void onDestroy() {
-        alive = false;
+    /** The tab is closed (or the app is): the pages go. */
+    void destroy() {
+        closed = true;
+        if (fullView != null) hideFull();
         ui.removeCallbacks(tick);
         ui.removeCallbacks(watchMedia);
         PlaybackService.stop(this);
         if (webA != null) webA.destroy();
         if (webB != null) webB.destroy();
-        super.onDestroy();
+        if (stage.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) stage.getParent()).removeView(stage);
     }
 }

@@ -120,7 +120,7 @@ public class NewsAlerts extends JobService {
         int id = 5000 + (link.hashCode() & 0xFFFF);
         int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
 
-        Intent open = new Intent(c, BrowserActivity.class).putExtra(BrowserActivity.EXTRA_URL, link)
+        Intent open = new Intent(c, MainActivity.class).putExtra(BrowserPanel.EXTRA_URL, link)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).setData(Uri.parse("babel-news://open/" + id));
         Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain")
                 .putExtra(Intent.EXTRA_SUBJECT, title)

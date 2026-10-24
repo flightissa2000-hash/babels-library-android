@@ -37,7 +37,7 @@ public class PlaybackService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && STOP.equals(intent.getAction())) {
-            BrowserActivity b = BrowserActivity.current();
+            BrowserPanel b = BrowserPanel.current();
             if (b != null) b.pauseMedia();
             stopSelf();
             return START_NOT_STICKY;
@@ -50,7 +50,7 @@ public class PlaybackService extends Service {
         b.setSmallIcon(android.R.drawable.ic_media_play).setOngoing(true).setOnlyAlertOnce(true)
                 .setContentTitle(title == null || title.isEmpty() ? "Playing in Babel's Library" : title)
                 .setContentText("Keeps playing with the screen off · tap to go back")
-                .setContentIntent(PendingIntent.getActivity(this, 0, new Intent(this, BrowserActivity.class)
+                .setContentIntent(PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class).putExtra("browser", true)
                         .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT), PendingIntent.FLAG_IMMUTABLE))
                 .addAction(new Notification.Action.Builder(null, "Stop", PendingIntent.getService(this, 1,
                         new Intent(this, PlaybackService.class).setAction(STOP), PendingIntent.FLAG_IMMUTABLE)).build());

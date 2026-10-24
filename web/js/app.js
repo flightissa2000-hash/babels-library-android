@@ -243,6 +243,7 @@ function applyTheme() {
 }
 /* full screen: the tabs tuck away; the nub on the right edge (or a swipe in from it) brings them back */
 function tabsOff(off) {
+  setTimeout(placeBrowser, 320);           // (the browser gets the room the tabs leave, or gives it back)
   S.tabsOff = off;
   document.body.classList.remove("nav-open");
   document.documentElement.classList.toggle("tabs-off", off);
@@ -547,6 +548,7 @@ function row(it) {
 
 /* ---------------------------------------------------------------- screens */
 function setTab(t) {
+  if (t !== "browser" && A && A.browserHide) A.browserHide();      // (the browser's page waits, out of sight)
   S.tab = t; S.limit = 60;
   $$("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
   const ic = $(`#tabs [data-tab="${t}"] b`);
@@ -577,7 +579,29 @@ function render() {
 const WIKI = "https://en.wikipedia.org/w/index.php?search=";
 // (the split view's own "other half" page isn't a site you visited)
 function history() { try { return JSON.parse(A ? A.browserHistory() : "[]").filter((x) => /^https?:/.test(x.url || "") && !/^https?:\/\/babel\.invalid\//.test(x.url)); } catch (e) { return []; } }
+/* The browser lives on this tab (Android): with a page open it fills the room beside the app's tabs, and stays as it
+   was while you're on other tabs, until ✕ closes it; then the start page below shows again. */
+const browserPage = () => { try { const o = A && !WEB && A.browserOpen && A.browserOpen(); return o ? JSON.parse(o) : null; } catch (e) { return null; } };
+function browserRect() {
+  let top = 0, right = innerWidth;
+  if (document.documentElement.dataset.nav === "drawer") top = Math.round($(".top").getBoundingClientRect().bottom);     // (☰ stays reachable)
+  else if (!S.tabsOff) right = Math.round($("#tabs").getBoundingClientRect().left) || innerWidth;
+  else right = innerWidth - 24;                                     // (the edge the tabs swipe back in from)
+  const cut = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--cut")) || 0;      // (the camera hole)
+  return { x: 0, y: top, w: right, h: innerHeight - top, cut };
+}
+function placeBrowser() {
+  const o = browserPage();
+  if (!o || !(o.url || o.alive)) return;
+  if (S.tab !== "browser" || !A || !A.browserShow || document.body.classList.contains("nav-open") || Reader.open) return A && A.browserHide && A.browserHide();
+  A.browserShow(JSON.stringify(browserRect()));
+}
+addEventListener("resize", () => { if (S.tab === "browser" && browserPage()) placeBrowser(); });
+window.Native.browserClosed = () => { if (S.tab === "browser") render(); };
 function renderBrowser(v) {
+  const open = browserPage();
+  if (open && (open.url || open.alive)) { v.innerHTML = `<div class="bw-hole" id="bwHole"></div>`; return requestAnimationFrame(placeBrowser); }
+  if (A && A.browserHide) A.browserHide();
   const h = history().reverse();
   const words = S.bq.toLowerCase().split(/\s+/).filter(Boolean);
   const list = h.filter((x) => words.every((w) => (x.url + " " + (x.title || "")).toLowerCase().includes(w)));
@@ -634,9 +658,7 @@ function renderBrowser(v) {
     ${sites.length ? `<div class="bw-tiles">${sites.map((s) => `<button class="bw-tile" data-go-url="${esc(s.url)}"><span class="ring">${letter(s)}</span><small>${esc(s.site)}</small><span class="bw-unpin" data-unpin="${esc(s.url)}" role="button" aria-label="Remove bookmark">✕</span></button>`).join("")}</div>` : ""}`;
   }
   // the page you left open in the browser (‹ Library or Back keeps it): one tap goes back to it
-  let open = null; try { open = A && A.browserOpen && A.browserOpen() ? JSON.parse(A.browserOpen()) : null; } catch (e) {}
-  const resume = open && open.url ? `<button class="bw-resume" data-bresume type="button"><span class="bw-resume-ic">↩</span><span class="t"><small>Open in the browser</small><b>${esc(open.title || open.url)}</b><em>${esc(open.url.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60))}</em></span></button>` : "";
-  v.innerHTML = `<div class="bw-page home-${H}"><div class="bw-top"><button class="btn sm bw-stylebtn" id="bStyle" type="button">🧭 Layout</button></div>${resume}
+  v.innerHTML = `<div class="bw-page home-${H}"><div class="bw-top"><button class="btn sm bw-stylebtn" id="bStyle" type="button">🧭 Layout</button></div>
     <div class="bw-stylepick" id="bStylePick" ${S.bPick ? "" : "hidden"}><h4>Start page</h4>${BHOMES.map(([k, n, d]) => `<button class="bw-bpick ${H === k ? "on" : ""}" data-bhpick="${k}"><i class="ho ho-${k}"><b></b></i><b>${n}</b><small>${d}</small></button>`).join("")}
       ${WEB ? "" : "<h4>Browser controls</h4>"}${WEB ? "" : BLAYOUTS.map(([k, n, d]) => `<button class="bw-bpick ${S.blayout === k ? "on" : ""}" data-blpick="${k}"><i class="lo lo-${k}"><b></b></i><b>${n}</b><small>${d}</small></button>`).join("")}</div>
     ${start}
@@ -667,7 +689,6 @@ window.Native.pwImported = (r) => {
   if (S.tab === "browser") render();
 };
 document.addEventListener("click", (e) => {
-  if (e.target.closest?.("[data-bresume]")) return A && A.openBrowser("");
   if (e.target.closest?.("#pwImport")) return A && A.importPasswords();
   if (e.target.closest?.("#pwClear")) { if (confirm("Remove all the passwords saved on this phone? Your computer's aren't touched.")) { A.clearPasswords(); toast("Passwords removed"); render(); } return; }
   const un = e.target.closest?.("[data-unpin]");
@@ -1409,8 +1430,8 @@ document.addEventListener("click", (e) => {
   const t = e.target;
   if (t.closest("#navHide")) return tabsOff(true);
   if (t.closest("#navNub")) return tabsOff(false);
-  if (t.closest("#navMenu")) return document.body.classList.toggle("nav-open");
-  if (t.closest("#navScrim")) return document.body.classList.remove("nav-open");
+  if (t.closest("#navMenu")) { document.body.classList.toggle("nav-open"); return placeBrowser(); }     // (the drawer goes over the browser)
+  if (t.closest("#navScrim")) { document.body.classList.remove("nav-open"); return placeBrowser(); }
   const tab = t.closest("#tabs [data-tab]"); if (tab) { document.body.classList.remove("nav-open"); return setTab(tab.dataset.tab); }
   const np = t.closest("[data-nav-pick]"); if (np) { S.nav = np.dataset.navPick; saveState(); applyTheme(); return render(); }
   const jp = t.closest("[data-jstyle-pick]"); if (jp) { S.jstyle = jp.dataset.jstylePick; saveState(); applyTheme(); return render(); }

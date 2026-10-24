@@ -75,6 +75,8 @@ public class MainActivity extends Activity {
     private final ExecutorService pool = Executors.newFixedThreadPool(4);
     private final Map<String, List<String>> comicPages = new HashMap<>();
     private LocalServer media;
+    private android.widget.FrameLayout screen;          // the app's page, with the browser laid over its Browser tab
+    private BrowserPanel browser;                        // the browser's one tab: kept while you're elsewhere in the app
 
     static File libraryDir(Context c) {
         File d = c.getExternalFilesDir("library");
@@ -132,9 +134,77 @@ public class MainActivity extends Activity {
             }
         });
         if (BuildConfigDebug.DEBUG) WebView.setWebContentsDebuggingEnabled(true);
-        setContentView(web);
+        screen = new android.widget.FrameLayout(this);
+        screen.addView(web, new android.widget.FrameLayout.LayoutParams(-1, -1));
+        setContentView(screen);
         web.loadUrl(START);
         shared(getIntent());
+        Intent first = getIntent();
+        web.postDelayed(() -> fromNotification(first), 1500);      // (once the page is up)
+    }
+
+    // ------------------------------------------------------------------ the browser, inside the app
+    /** The browser: made the first time it's needed (with the page asked for, or the one open when the app closed). */
+    private boolean ensureBrowser(String url) {
+        if (browser != null) return false;
+        browser = new BrowserPanel(this, screen, url, null);
+        browser.onClosed = this::closeBrowser;
+        View v = browser.view();
+        v.setVisibility(View.INVISIBLE);
+        screen.addView(v, new android.widget.FrameLayout.LayoutParams(1, 1));
+        return true;
+    }
+    /** a page from the app (a link, a search, a bookmark): opens in the browser's tab, and the Browser tab shows it */
+    private void openBrowserNow(String url) {
+        if (!ensureBrowser(url)) browser.open(url);
+        js("window.setTab && setTab('browser')");
+    }
+    /** where the page's Browser tab has room for it (CSS pixels, from the page) */
+    private void placeBrowser(String json) {
+        try {
+            JSONObject r = new JSONObject(json);
+            float d = getResources().getDisplayMetrics().density;
+            android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(Math.max(1, Math.round((float) r.optDouble("w") * d)), Math.max(1, Math.round((float) r.optDouble("h") * d)));
+            lp.leftMargin = Math.round((float) r.optDouble("x") * d);
+            lp.topMargin = Math.round((float) r.optDouble("y") * d);
+            browser.view().setLayoutParams(lp);
+            browserCut = lp.topMargin == 0 ? Math.round((float) r.optDouble("cut", 0) * d) : 0;
+            browser.topInset(browserCut);
+            browser.view().setVisibility(View.VISIBLE);
+        } catch (Exception ignored) { }
+    }
+    /** ✕ on the browser's last page: the tab is closed; the Browser tab shows its start page */
+    private void closeBrowser() {
+        if (browser == null) return;
+        browser.destroy();
+        browser = null;
+        js("window.Native && Native.browserClosed && Native.browserClosed()");
+    }
+    /** a new browser layout or theme: the bar is built again, around the same page and its Back history */
+    private String browserLook = "";
+    private int browserCut = 0;
+    private void restyleBrowser(String json) {
+        String look = "";
+        try { JSONObject o = new JSONObject(json); look = o.optString("theme") + "/" + o.optString("layout"); } catch (Exception ignored) { }
+        boolean changed = !browserLook.isEmpty() && !look.equals(browserLook);
+        browserLook = look;
+        if (!changed || browser == null) return;
+        Bundle st = browser.save();
+        boolean shown = browser.view().getVisibility() == View.VISIBLE;
+        android.view.ViewGroup.LayoutParams lp = browser.view().getLayoutParams();
+        browser.destroy();
+        browser = new BrowserPanel(this, screen, "", st);
+        browser.onClosed = this::closeBrowser;
+        browser.view().setVisibility(shown ? View.VISIBLE : View.INVISIBLE);
+        browser.topInset(browserCut);
+        screen.addView(browser.view(), lp);
+    }
+    /** from a notification: a News event's page, or back to what's playing in the browser */
+    private void fromNotification(Intent i) {
+        if (i == null) return;
+        String url = i.getStringExtra(BrowserPanel.EXTRA_URL);
+        if (url != null && !url.isEmpty()) openBrowserNow(url);
+        else if (i.getBooleanExtra("browser", false)) js("window.setTab && setTab('browser')");
     }
 
     // ------------------------------------------------------------------ sending files to the computer
@@ -152,6 +222,7 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
         shared(i);
+        fromNotification(i);
     }
 
     /** "Share → Babel's Library" from another app: the files go to the computer's library. */
@@ -462,7 +533,7 @@ public class MainActivity extends Activity {
             NewsAlerts.schedule(this);
             pool.execute(() -> { try { NewsAlerts.check(this); } catch (Exception ignored) { } });
         }
-        if (BrowserActivity.toStart) { BrowserActivity.toStart = false; js("window.setTab && setTab('browser')"); }   // (the browser's ✕: its start page)
+        if (browser != null) browser.onResume();
     }
 
     @Override
@@ -515,12 +586,14 @@ public class MainActivity extends Activity {
     protected void onPause() {
         js("window.Native && Native.onPause()");
         if (dictation != null) dictation.stop();          // the microphone is never left on in the background
+        if (browser != null) browser.onPause();
         super.onPause();
     }
 
     @Override
     protected void onDestroy() {
         if (dictation != null) dictation.destroy();
+        if (browser != null) browser.destroy();          // (its page is remembered: it opens again next time)
         super.onDestroy();
     }
 
@@ -534,6 +607,8 @@ public class MainActivity extends Activity {
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
+        // on the Browser tab, Back goes back a page first; past the first page the app goes back (the page stays open)
+        if (browser != null && browser.view().getVisibility() == View.VISIBLE && browser.back()) return;
         web.evaluateJavascript("window.Native ? Native.onBack() : false", v -> {
             if (!"true".equals(v)) MainActivity.super.onBackPressed();
         });
@@ -752,41 +827,46 @@ public class MainActivity extends Activity {
 
         // ---- bookmarks (☆ in the browser): a copy of the computer's list, kept here for when it can't be reached
         @JavascriptInterface
-        public String bookmarks() { return BrowserActivity.readBookmarks(MainActivity.this); }
+        public String bookmarks() { return BrowserPanel.readBookmarks(MainActivity.this); }
 
         @JavascriptInterface
-        public void setBookmarks(String json) { BrowserActivity.writeBookmarks(MainActivity.this, json); }
+        public void setBookmarks(String json) { BrowserPanel.writeBookmarks(MainActivity.this, json); }
 
         // ---- the browser
         @JavascriptInterface
-        public void openBrowser(String url) {
-            Intent i = new Intent(MainActivity.this, BrowserActivity.class);
-            i.putExtra(BrowserActivity.EXTRA_URL, url == null ? "" : url);
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);         // (its own task: an open page waits there while you're in the app)
-            runOnUiThread(() -> startActivity(i));
-        }
+        public void openBrowser(String url) { runOnUiThread(() -> openBrowserNow(url == null ? "" : url)); }
+
+        /** The Browser tab is showing, with room for the browser here ({x, y, w, h} in CSS pixels). */
+        @JavascriptInterface
+        public void browserShow(String rect) { runOnUiThread(() -> { ensureBrowser(""); placeBrowser(rect); }); }
+
+        /** Another tab: the browser is put out of sight, its page kept (what's playing carries on). */
+        @JavascriptInterface
+        public void browserHide() { runOnUiThread(() -> { if (browser != null) browser.view().setVisibility(View.INVISIBLE); }); }
 
         /** The page left open in the browser ({url, title}), or "" when there isn't one. */
         @JavascriptInterface
         public String browserOpen() {
             android.content.SharedPreferences p = getSharedPreferences("browser", MODE_PRIVATE);
-            String u = p.getString("open_url", "");
-            if (u.isEmpty()) return "";
-            try { return new JSONObject().put("url", u).put("title", p.getString("open_title", "")).put("alive", BrowserActivity.alive).toString(); } catch (Exception e) { return ""; }
+            BrowserPanel b = browser;
+            String u = b != null && !b.url().isEmpty() ? b.url() : p.getString("open_url", "");
+            if (u.isEmpty() && b == null) return "";
+            try { return new JSONObject().put("url", u).put("title", b != null ? b.title() : p.getString("open_title", "")).put("alive", b != null).toString(); } catch (Exception e) { return ""; }
         }
 
         /** The page's theme colours, for the browser screen's bar (it's native, so it can't read the CSS). */
         @JavascriptInterface
         public void setBrowserTheme(String json) {
-            if (json != null && json.length() < 4000)
-                getSharedPreferences("browser", MODE_PRIVATE).edit().putString("theme", json).apply();
+            if (json == null || json.length() >= 4000) return;
+            getSharedPreferences("browser", MODE_PRIVATE).edit().putString("theme", json).apply();
+            runOnUiThread(() -> restyleBrowser(json));
         }
 
         @JavascriptInterface
-        public String browserHistory() { return BrowserActivity.readHistory(MainActivity.this); }
+        public String browserHistory() { return BrowserPanel.readHistory(MainActivity.this); }
 
         @JavascriptInterface
-        public boolean setBrowserHistory(String json) { return BrowserActivity.writeHistory(MainActivity.this, json); }
+        public boolean setBrowserHistory(String json) { return BrowserPanel.writeHistory(MainActivity.this, json); }
 
         /** Fetch the computer's ad and tracker block lists for the browser (about 1 MB, compressed). */
         @JavascriptInterface
@@ -794,13 +874,13 @@ public class MainActivity extends Activity {
             pool.execute(() -> {
                 Net.Res r = Net.call("GET", "/sync/adblock", null);
                 if (r.status == 200 && r.body.length > 1000) {
-                    try (FileOutputStream out = new FileOutputStream(BrowserActivity.blockFile(MainActivity.this))) {
+                    try (FileOutputStream out = new FileOutputStream(BrowserPanel.blockFile(MainActivity.this))) {
                         out.write(r.body);
                     } catch (IOException e) {
                         done(id, 0, e.getMessage(), "");
                         return;
                     }
-                    BrowserActivity.forgetBlocklist();
+                    BrowserPanel.forgetBlocklist();
                 }
                 done(id, r.status, String.valueOf(r.body.length), Net.via);
             });
@@ -808,7 +888,7 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public long adblockAge() {
-            File f = BrowserActivity.blockFile(MainActivity.this);
+            File f = BrowserPanel.blockFile(MainActivity.this);
             return f.isFile() ? f.lastModified() / 1000 : 0;
         }
 

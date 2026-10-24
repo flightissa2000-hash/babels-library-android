@@ -64,15 +64,6 @@
                 <data android:mimeType="video/*" />
             </intent-filter>
         </activity>
-        <!-- the browser runs as a task of its own, so going back to the app leaves its page open -->
-        <activity
-            android:name=".BrowserActivity"
-            android:label="Babel's Browser"
-            android:taskAffinity="com.personal.babelslibrary.browser"
-            android:launchMode="singleTask"
-            android:exported="false"
-            android:configChanges="orientation|screenSize|keyboardHidden|uiMode|screenLayout|smallestScreenSize|density"
-            android:windowSoftInputMode="adjustResize" />
         <!-- sends files to the computer in the background, with progress and Cancel in the notification shade -->
         <service
             android:name=".UploadService"
