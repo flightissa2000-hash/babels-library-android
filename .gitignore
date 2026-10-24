@@ -1,0 +1,10 @@
+# builds and signing (the keystore and its password are yours alone: never upload them)
+build/
+*.apk
+*.apk.idsig
+*.keystore
+*.jks
+keystore-password.txt
+# Python
+__pycache__/
+*.pyc
