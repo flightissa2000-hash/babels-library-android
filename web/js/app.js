@@ -5,6 +5,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const A = window.Android || null;   // the Java bridge (missing in a desktop browser preview)
+const WEB = !!(A && A.web);         // the iPhone / iPad web app (ios/bridge.js stands in for the Java bridge)
 const now = () => Date.now() / 1000;
 window.Reader = { open: false };      // filled in by readers.js
 
@@ -579,15 +580,15 @@ function renderBrowser(v) {
   }
   v.innerHTML = `<div class="bw-page home-${H}"><div class="bw-top"><button class="btn sm bw-stylebtn" id="bStyle" type="button">🧭 Layout</button></div>
     <div class="bw-stylepick" id="bStylePick" ${S.bPick ? "" : "hidden"}><h4>Start page</h4>${BHOMES.map(([k, n, d]) => `<button class="bw-bpick ${H === k ? "on" : ""}" data-bhpick="${k}"><i class="ho ho-${k}"><b></b></i><b>${n}</b><small>${d}</small></button>`).join("")}
-      <h4>Browser controls</h4>${BLAYOUTS.map(([k, n, d]) => `<button class="bw-bpick ${S.blayout === k ? "on" : ""}" data-blpick="${k}"><i class="lo lo-${k}"><b></b></i><b>${n}</b><small>${d}</small></button>`).join("")}</div>
+      ${WEB ? "" : "<h4>Browser controls</h4>"}${WEB ? "" : BLAYOUTS.map(([k, n, d]) => `<button class="bw-bpick ${S.blayout === k ? "on" : ""}" data-blpick="${k}"><i class="lo lo-${k}"><b></b></i><b>${n}</b><small>${d}</small></button>`).join("")}</div>
     ${start}
     <button class="btn bw-histbtn" id="bHist" type="button">🕘 History</button>
     ${sites.length ? "" : `<p class="bw-nobm">No bookmarks yet. Press ☆ on the browser's bar while you're on a page (here or on your computer) and it shows up here.</p>`}
-    <section class="bw-pw">
+    ${WEB ? `<p class="hint">Pages open in Safari (with its own passwords, Reader view and content blockers). Pages you open from here are listed in History.</p>` : `<section class="bw-pw">
       <div><b>🔑 Saved passwords</b><small>${pwN ? `${pwN} saved on this phone, encrypted in its secure keystore. On a site you have one for, 🔑 on the browser's bar fills it in.` : "Import an export from Chrome, Firefox, Edge, Bitwarden, 1Password or LastPass (a .csv file). They're encrypted in this phone's secure keystore."}</small></div>
       <div class="btns"><button class="btn sm" id="pwImport" type="button">Import passwords…</button>${pwN ? `<button class="btn sm danger" id="pwClear" type="button">Remove all</button>` : ""}</div>
     </section>
-    <p class="hint">Ads and pop-ups blocked. ⧉ on the browser's bar splits it in two. Your phone's own password manager (Google, Samsung Pass…) works here too.</p>
+    <p class="hint">Ads and pop-ups blocked. ⧉ on the browser's bar splits it in two. Your phone's own password manager (Google, Samsung Pass…) works here too.</p>`}
     <div class="bw-sheet${S.bOpen ? " open" : ""}" id="bSheet">
       <div class="bw-sheet-head"><b>History</b><button class="btn sm" id="bHistClose" type="button" aria-label="Close history">✕</button></div>
       <div class="bw-sheet-body">
@@ -1038,6 +1039,10 @@ function renderSettings(v) {
         ${S.lastSync ? ` Last synced ${ago(S.lastSync)}.` : ""}</p>
         <div class="btns"><button class="btn primary" id="syncNow">Sync now</button><button class="btn" id="fullSync">Fetch everything again</button><button class="btn danger" id="unpair">Unpair</button></div>
         <p class="hint">Home address: ${esc(S.conn.lan || "?")}${S.conn.remote ? " · away-from-home address known" : ""}</p>`
+      : WEB ? `<p class="hint">On the computer, open Babel's Library → Settings → <b>Phone</b>, make sure <b>Reach this library from anywhere</b> is on, then <b>Pair a phone…</b> for a 6-digit code. Type it here: the app finds your computer by itself.</p>
+        <div class="field"><label for="code">Pairing code</label><input id="code" class="code" inputmode="numeric" maxlength="7" placeholder="000 000"></div>
+        <button class="btn primary" id="pairBtn">Pair</button>
+        <details class="web-addr"><summary>Can't find it?</summary><div class="field"><label for="addr">The computer's away-from-home address (https://….trycloudflare.com, shown under the code)</label><input id="addr" inputmode="url" placeholder="https://….trycloudflare.com" value="${esc(S.pairAddr || "")}"></div></details>`
       : `<p class="hint">On the computer, open Babel's Library → Settings → <b>Phone</b> → <b>Pair a phone…</b> to get a 6-digit code. Phone and computer need to be on the same Wi-Fi for this first step.</p>
         <div class="btns"><button class="btn" id="look">Look for my computer</button></div>
         <div class="found" id="found">${found ? found.map((f) => `<button class="row" data-pick="${esc(f.url)}"><span class="t"><b>💻 ${esc(f.name)}</b><small>${esc(f.url)}</small></span></button>`).join("") || `<p class="hint">Didn't find it. Type its address instead (shown under the code on the computer).</p>` : ""}</div>
@@ -1059,14 +1064,14 @@ function renderSettings(v) {
       <label class="check"><input type="checkbox" id="autoGet" ${S.autoGet ? "checked" : ""}> Fetch files sent from the computer by itself (Wi-Fi or mobile data)</label></div>
     <div class="panel"><h3>News</h3>
       <label class="check"><input type="checkbox" id="newsAlerts" ${A && A.newsAlerts && A.newsAlerts() ? "checked" : ""}> Notify me when a new event turns up in the News “Events” section</label>
-      <p class="hint">The computer looks every few hours; the phone checks in about once an hour and needs to reach the computer (home Wi-Fi, or “Reach this library from anywhere”). Each notification has Share and Open.</p></div>
+      <p class="hint">${WEB ? "Works when this app is on your Home Screen (in Safari: Share → Add to Home Screen, then open it from there). The computer looks every few hours and sends the notification; tap it to share or open the event." : "The computer looks every few hours; the phone checks in about once an hour and needs to reach the computer (home Wi-Fi, or “Reach this library from anywhere”). Each notification has Share and Open."}</p></div>
     <div class="panel"><h3>Look</h3>
       <div class="field"><label for="themeSel">Theme</label><select id="themeSel"><option value="auto">Same as the computer</option>${Object.entries(window.THEMES || {}).map(([k, t]) => `<option value="${k}">${esc(t.name)}</option>`).join("")}</select></div>
       <h4 class="pick-h">Getting around <small>how you switch between Home, Library, Catalogue…</small></h4>
       <div class="pick-grid">${NAVS.map(([k, n, d, zany]) => `<button class="pick ${S.nav === k ? "on" : ""} ${zany ? "zany" : ""}" data-nav-pick="${k}"><i class="pk pk-${k}"></i><b>${n}</b><small>${d}</small></button>`).join("")}</div>
       <h4 class="pick-h">Journal style</h4>
       <div class="pick-grid three">${JSTYLES.map(([k, n, d]) => `<button class="pick ${S.jstyle === k ? "on" : ""}" data-jstyle-pick="${k}"><i class="pk pk-j-${k}"></i><b>${n}</b><small>${d}</small></button>`).join("")}</div></div>
-    <p class="hint" style="text-align:center">Babel's Library for Android 1.0${S.ops.length ? ` · ${S.ops.length} change${S.ops.length === 1 ? "" : "s"} waiting to send` : ""}</p>`;
+    <p class="hint" style="text-align:center">Babel's Library for ${WEB ? "iPhone & iPad" : "Android"} 1.0${S.ops.length ? ` · ${S.ops.length} change${S.ops.length === 1 ? "" : "s"} waiting to send` : ""}</p>`;
   if ($("#themeSel")) $("#themeSel").value = S.themeChoice;
 }
 async function lookForComputer() {
@@ -1079,10 +1084,13 @@ async function lookForComputer() {
 async function pair() {
   let addr = ($("#addr").value || "").trim();
   const code = ($("#code").value || "").replace(/\D/g, "");
-  if (!addr) return toast("Type the computer's address, or tap Look for my computer.");
+  if (!addr && !WEB) return toast("Type the computer's address, or tap Look for my computer.");
   if (code.length !== 6) return toast("The code has 6 digits.");
-  if (!/^https?:\/\//.test(addr)) addr = "http://" + addr;
-  if (!/:\d+$/.test(addr.replace(/^https?:\/\//, ""))) addr += ":8766";
+  if (WEB) { if (addr && !/^https:\/\//.test(addr)) addr = "https://" + addr.replace(/^\w+:\/\//, ""); }   // (empty: found from the code)
+  else {
+    if (!/^https?:\/\//.test(addr)) addr = "http://" + addr;
+    if (!/:\d+$/.test(addr.replace(/^https?:\/\//, ""))) addr += ":8766";
+  }
   S.pairAddr = addr;
   const b = $("#pairBtn"); b.disabled = true; b.textContent = "Pairing…";
   const device = load("device.json", null) || { id: "ph-" + Math.random().toString(36).slice(2) + Date.now().toString(36) };
@@ -1092,9 +1100,10 @@ async function pair() {
   try { d = JSON.parse(r.text || "{}"); } catch (e) {}
   if (r.status !== 200) {
     b.disabled = false; b.textContent = "Pair";
-    return toast(r.status ? d.error || "Pairing failed." : "Couldn't reach that address. Is the computer on, on the same Wi-Fi?");
+    return toast(r.status ? d.error || "Pairing failed." : WEB ? (r.text || "Couldn't find your computer. Is it on, with “Reach this library from anywhere” switched on?") : "Couldn't reach that address. Is the computer on, on the same Wi-Fi?");
   }
-  S.conn = { lan: addr, remote: "", topic: d.topic || "", token: d.token, pc: d.pc || "" };
+  // (the web app always goes through the away-from-home address: an https page can't reach the home Wi-Fi's http one)
+  S.conn = WEB ? { lan: "", remote: r.route || addr, topic: d.topic || "", token: d.token, pc: d.pc || "" } : { lan: addr, remote: "", topic: d.topic || "", token: d.token, pc: d.pc || "" };
   S.since = 0; S.items = {}; S.ops = []; saveOps();
   pushConn(); saveState();
   toast(`Paired with ${d.pc}`);

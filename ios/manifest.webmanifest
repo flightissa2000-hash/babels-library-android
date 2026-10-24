@@ -1,0 +1,16 @@
+{
+  "name": "Babel's Library",
+  "short_name": "Babel's",
+  "description": "Your Babel's Library on iPhone and iPad: read, watch and listen offline, in step with your computer.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#bfe7ff",
+  "theme_color": "#bfe7ff",
+  "icons": [
+    { "src": "ios/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "ios/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "ios/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,17 @@
+/* The iPhone app's own bits: the notch and Home indicator (the Android app is told the camera's size by Java),
+   the "add to Home Screen" tip, and the pairing address hidden under "Can't find it?" */
+:root{--cut:env(safe-area-inset-top,0px)}
+html,body{overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
+body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+#view{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+input,select,textarea{font-size:16px}              /* (smaller text makes Safari zoom in on every field) */
+.ios-tip{position:fixed;left:12px;right:12px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:500;display:flex;flex-direction:column;gap:4px;
+  padding:14px 44px 14px 16px;border-radius:16px;background:var(--surface);color:var(--ink);border:var(--card-border,2px solid var(--line));box-shadow:0 12px 34px rgba(0,0,0,.35);font-size:.9rem;line-height:1.35;animation:kaUp .3s ease-out}
+.ios-tip b{font-size:1rem}
+.ios-tip button{position:absolute;top:8px;right:8px;width:32px;height:32px;border:0;border-radius:50%;background:color-mix(in srgb,var(--ink) 10%,transparent);color:var(--ink);font-size:1rem}
+.ios-share{display:inline-block;width:14px;height:17px;margin:0 2px -3px;border:2px solid currentColor;border-top:0;border-radius:2px;position:relative}
+.ios-share::before{content:"";position:absolute;left:50%;top:-8px;width:2px;height:12px;margin-left:-1px;background:currentColor}
+.ios-share::after{content:"";position:absolute;left:50%;top:-9px;width:6px;height:6px;margin-left:-4px;border-left:2px solid currentColor;border-top:2px solid currentColor;transform:rotate(45deg)}
+.web-addr{margin-top:12px}
+.web-addr summary{color:var(--ink-soft);font-weight:700;font-size:.85rem}
+.web-addr .field{margin-top:8px}

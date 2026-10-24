@@ -54,7 +54,7 @@ Object.assign(window.Reader, (() => {
   function unsupported(msg) {
     const st = shell(R.it);
     st.innerHTML = `<div class="r-msg"><p>${esc(msg)}</p><p class="hint" style="color:#bbb">Another app on your phone may be able to open it.</p>
-      <button class="btn primary" id="rWith">Open in another app</button></div>`;
+      <button class="btn primary" id="rWith">${WEB ? "Share / open in another app" : "Open in another app"}</button></div>`;
     $("#rWith").onclick = () => { if (!A.openWith(R.name)) toast("No app on the phone can open this kind of file."); };
   }
   function close() {
@@ -450,6 +450,8 @@ Object.assign(window.Reader, (() => {
     v.addEventListener("error", () => { if (R && R.it === it) unsupported("This video's format can't be played inside the app."); });
     v.addEventListener("click", (e) => { if (e.target === v) $("#reader").classList.toggle("calm"); });
     v.src = (A && A.mediaUrl(R.name)) || R.url;
+    // (the iPhone app hands the player the stored file itself: Safari seeks in it far more reliably)
+    if (A && A.mediaUrlAsync) A.mediaUrlAsync(R.name).then((u) => { if (u && R && R.it === it) { const t = parseFloat(it.last_location) || 0; v.src = u; if (t > 5) v.addEventListener("loadedmetadata", () => { if (t < v.duration - 10) v.currentTime = t; }, { once: true }); } });
     R.cleanup = () => { v.pause(); v.removeAttribute("src"); v.load(); };
   }
   function nextEpisode(it) {
@@ -477,6 +479,7 @@ Object.assign(window.Reader, (() => {
       if (nx) start(nx);
     });
     a.src = (A && A.mediaUrl(R.name)) || R.url;
+    if (A && A.mediaUrlAsync) A.mediaUrlAsync(R.name).then((u) => { if (u && R && R.it === it) a.src = u; });
     R.cleanup = () => { a.pause(); a.removeAttribute("src"); a.load(); };
   }
 
