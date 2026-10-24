@@ -72,6 +72,17 @@ async function viaComputer(req, cacheName, path) {
   return res;
 }
 
+/* /net/<path>: a GET from the computer with the pairing token (subtitles and audiobook chapters; Range passes through) */
+async function net(req, path) {
+  await conn();
+  const range = req.headers.get("range");
+  const r = await Net.call("GET", path, null, 60000, range ? { Range: range } : {});
+  if (!r.status) return new Response("", { status: 503 });
+  const h = new Headers();
+  for (const k of ["content-type", "content-range", "content-length", "accept-ranges"]) if (r.res.headers.get(k)) h.set(k, r.res.headers.get(k));
+  return new Response(r.res.body, { status: r.res.status, headers: h });
+}
+
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin || e.request.method !== "GET") return;
@@ -85,6 +96,7 @@ self.addEventListener("fetch", (e) => {
     return e.respondWith(viaComputer(e.request, "covers", "/sync/cover/" + id));
   }
   if (p === "/catcover") return e.respondWith(viaComputer(e.request, "catcovers", "/sync/cat/cover" + url.search));
+  if (p.startsWith("/net/sync/")) return e.respondWith(net(e.request, p.slice(4) + url.search));
   // the app itself: from the phone first (it works offline), refreshed when a new version is published
   e.respondWith(caches.open(SHELL).then(async (c) => (await c.match(e.request, { ignoreSearch: true })) || fetch(e.request)));
 });

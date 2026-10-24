@@ -27,6 +27,7 @@ shutil.copy(os.path.join(desk, "js", "themes.js"), os.path.join(out, "js", "them
 os.makedirs(os.path.join(out, "vendor", "fonts"), exist_ok=True)
 for f in ("pdf.min.js", "pdf.worker.min.js", "epub.min.js", "jszip.min.js"):
     shutil.copy(os.path.join(desk, "vendor", f), os.path.join(out, "vendor", f))
+shutil.copytree(os.path.join(desk, "vendor", "libarchive"), os.path.join(out, "vendor", "libarchive"))   # CBR, CB7 and CBT comics
 for f in os.listdir(os.path.join(desk, "vendor", "fonts")):
     if f.endswith(".woff2") and FONTS.match(f):
         shutil.copy(os.path.join(desk, "vendor", "fonts", f), os.path.join(out, "vendor", "fonts", f))

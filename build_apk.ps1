@@ -34,6 +34,7 @@ Copy-Item "$desk\js\themes.js" "$web\js\themes.js"
 Run $py -c "import sys; sys.path.insert(0, r'$desk\..'); import adblock; open(r'$web\yt_adblock.js', 'w', encoding='utf-8').write(adblock.YOUTUBE_JS)"
 New-Item -ItemType Directory -Force "$web\vendor\fonts" | Out-Null
 foreach ($f in 'pdf.min.js', 'pdf.worker.min.js', 'epub.min.js', 'jszip.min.js') { Copy-Item "$desk\vendor\$f" "$web\vendor\$f" }
+Copy-Item -Recurse "$desk\vendor\libarchive" "$web\vendor\libarchive"   # CBR, CB7 and CBT comics
 foreach ($f in Get-ChildItem "$desk\vendor\fonts" -Filter *.woff2 | Where-Object { $_.Name -match '^(fredoka|nunito|ibm-plex-mono|anton|archivo-narrow|permanent-marker|im-fell-english-latin|chakra-petch-latin-700|cormorant-garamond-latin-600|libre-baskerville-latin-400)' }) { Copy-Item $f.FullName "$web\vendor\fonts\" }
 
 # resources: hand-written values + launcher icons made from the desktop icon

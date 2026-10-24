@@ -78,6 +78,7 @@ const Prof = {
     this.saveList();
     this.marks = this.isMain() ? {} : load(`progress-${id}.json`, {});
     this.apply();
+    Ann.switched();
     loadUnwrapped();
     W.sel = 0;
     paintProfile();
@@ -161,7 +162,7 @@ window.Native = {
   onResume() { refreshFiles(); sync(); },
   onPause() { if (Reader.open) Reader.saveNow(); saveLibrary(); },
   onBack() {
-    if (Reader.open) { Reader.close(); return true; }
+    if (Reader.open) return Reader.back();
     if (!$("#sheet").hidden) { closeSheet(); return true; }
     if (S.tab !== "home") { setTab("home"); return true; }
     return false;
@@ -287,6 +288,57 @@ function change(id, fields) {
   change.t = setTimeout(() => sync(), 4000);
 }
 
+/* ---------------------------------------------------------------- highlights, notes, pins and bookmarks
+   The same notes as the computer's reader (S.anns, synced). Ones made here go in a queue (aops.json) and are sent
+   with the next sync; until then they have the phone's own id, "c:…". Another profile's notes stay on this phone. */
+const Ann = {
+  _mine: null, flying: [],
+  queue: load("aops.json", []),
+  local() { return this._mine ??= load(`anns-${Prof.cur}.json`, {}); },
+  map() { return Prof.isMain() ? S.anns : this.local(); },
+  save() { if (Prof.isMain()) { store("aops.json", this.queue); saveLibrary(true); clearTimeout(change.t); change.t = setTimeout(() => sync(), 4000); } else store(`anns-${Prof.cur}.json`, this.local()); },
+  of(itemId) { return Object.values(this.map()).filter((a) => a.item_id === itemId); },
+  add(itemId, body) {
+    const cid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const a = { id: "c:" + cid, item_id: itemId, title: "", note: "", quote: "", color: "yellow", locator: {}, created_at: now(), updated_at: now(), ...body };
+    this.map()[a.id] = a;
+    if (Prof.isMain()) this.queue.push({ op: "add", cid, item_id: itemId, title: a.title, note: a.note, quote: a.quote, color: a.color, locator: a.locator });
+    this.save();
+    return a;
+  },
+  edit(a, fields) {
+    Object.assign(a, fields, { updated_at: now() });
+    if (Prof.isMain()) {
+      const add = String(a.id).startsWith("c:") && this.queue.find((o) => o.op === "add" && "c:" + o.cid === a.id && !this.flying.includes(o));
+      if (add) Object.assign(add, fields);            // (not sent yet: the change goes with it)
+      else {
+        const ed = this.queue.find((o) => o.op === "edit" && o.id === a.id);
+        if (ed) Object.assign(ed.fields, fields); else this.queue.push({ op: "edit", id: a.id, fields: { ...fields } });
+      }
+    }
+    this.save();
+  },
+  del(a) {
+    delete this.map()[a.id];
+    if (Prof.isMain()) {
+      if (String(a.id).startsWith("c:") && this.queue.some((o) => o.op === "add" && "c:" + o.cid === a.id && !this.flying.includes(o))) this.queue = this.queue.filter((o) => !(o.op === "add" && "c:" + o.cid === a.id) && o.id !== a.id);
+      else { this.queue = this.queue.filter((o) => o.id !== a.id); this.queue.push({ op: "del", id: a.id }); }
+    }
+    this.save();
+  },
+  /* saved on the computer: the phone's ids give way to the computer's */
+  made(map) {
+    for (const [cid, id] of Object.entries(map || {})) {
+      const a = S.anns["c:" + cid];
+      if (a) { delete S.anns["c:" + cid]; S.anns[id] = { ...a, id }; }
+      for (const o of this.queue) if (o.id === "c:" + cid) o.id = id;
+      if (window.Reader && Reader.renamed) Reader.renamed("c:" + cid, id);
+    }
+    store("aops.json", this.queue);
+  },
+  switched() { this._mine = null; },
+};
+
 /* ---------------------------------------------------------------- sync */
 let syncP = null;
 function sync(force) {
@@ -296,12 +348,15 @@ function sync(force) {
   syncP = (async () => {
     try {
       let made = {};
-      if (S.ops.length || S.jops.length) {
-        const sending = S.ops.slice(), jsending = S.jops.slice();
-        const r = await api("POST", "/sync/push", { ops: sending, jops: jsending, now: now() });
+      if (S.ops.length || S.jops.length || Ann.queue.length) {
+        const sending = S.ops.slice(), jsending = S.jops.slice(), asending = Ann.flying = Ann.queue.slice();
+        let r;
+        try { r = await api("POST", "/sync/push", { ops: sending, jops: jsending, aops: asending, now: now() }); } finally { Ann.flying = []; }
         made = r.made || {};
         S.ops = S.ops.filter((o) => !sending.includes(o));
         S.jops = S.jops.filter((o) => !jsending.includes(o));
+        Ann.queue = Ann.queue.filter((o) => !asending.includes(o));
+        Ann.made(r.made_anns);
         saveOps();
       }
       const d = await api("GET", `/sync/pull?since=${force ? 0 : S.since}`);
@@ -893,7 +948,7 @@ function libList() {
   const area = LIB.kinds[S.area] ? S.area : "books";
   const q = S.q.toLowerCase().trim();
   const nn = {};
-  for (const a of Object.values(S.anns)) nn[a.item_id] = (nn[a.item_id] || 0) + 1;
+  for (const a of Object.values(Ann.map())) nn[a.item_id] = (nn[a.item_id] || 0) + 1;
   const list = Object.values(S.items).filter((it) => {
     if (!LIB.kinds[area].includes(it.kind)) return false;
     if (S.kind && S.kind !== "all" && !kindMatches(it, S.kind)) return false;
@@ -1126,7 +1181,7 @@ function openSheet(id) {
   const sh = $("#sheet");
   const here = onPhone(it), dl = S.downloads[id];
   const st = dl && S.dlState[dl];
-  const notes = Object.values(S.anns).filter((a) => a.item_id === it.id).sort((a, b) => a.created_at - b.created_at);
+  const notes = Ann.of(it.id).sort((a, b) => a.created_at - b.created_at);
   const log = Prof.isMain() && S.log.find((l) => l.item_id === it.id || (it.kind === "tv" && l.kind === "show" && String(l.title).toLowerCase() === String(it.series || "").toLowerCase()));
   const entries = log ? Object.values(S.journal).filter((j) => j.log_id === log.id).sort((a, b) => b.created_at - a.created_at) : [];
   const meta = [it.year, it.genre, it.kind === "graphic" ? (it.format === "manga" ? "Manga" : "Comic") : "", it.series && it.kind !== "tv" ? `${it.series}${it.series_index ? " #" + +it.series_index : ""}` : "",

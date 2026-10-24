@@ -66,7 +66,7 @@ public class MainActivity extends Activity {
                 {"gif", "image/gif"}, {"avif", "image/avif"}, {"bmp", "image/bmp"}, {"svg", "image/svg+xml"}, {"woff2", "font/woff2"}, {"ttf", "font/ttf"},
                 {"pdf", "application/pdf"}, {"epub", "application/epub+zip"}, {"cbz", "application/zip"}, {"mp3", "audio/mpeg"},
                 {"flac", "audio/flac"}, {"m4a", "audio/mp4"}, {"ogg", "audio/ogg"}, {"wav", "audio/wav"}, {"mp4", "video/mp4"},
-                {"m4v", "video/mp4"}, {"webm", "video/webm"}, {"mkv", "video/x-matroska"}, {"mov", "video/quicktime"}};
+                {"m4v", "video/mp4"}, {"wasm", "application/wasm"}, {"webm", "video/webm"}, {"mkv", "video/x-matroska"}, {"mov", "video/quicktime"}};
         for (String[] p : m) MIME.put(p[0], p[1]);
     }
 
@@ -115,6 +115,7 @@ public class MainActivity extends Activity {
                     if (p.startsWith("/part/")) return part(p.substring(6), u.getQueryParameter("s"), u.getQueryParameter("e"));
                     if (p.startsWith("/cover/")) return cover(p.substring(7), u.getQueryParameter("v"));
                     if (p.equals("/catcover")) return catCover(u.getEncodedQuery());
+                    if (p.startsWith("/net/")) return net(p.substring(4) + (u.getEncodedQuery() != null ? "?" + u.getEncodedQuery() : ""), req.getRequestHeaders());
                     if (p.startsWith("/comic/")) return comic(p.substring(7));
                 } catch (Exception e) {
                     return notFound();
@@ -345,6 +346,36 @@ public class MainActivity extends Activity {
             if (r.status == 404) break;
         }
         return notFound();
+    }
+
+    /** /net/<path>: a GET from the computer with the pairing token (the reader's subtitles and audiobook chapters
+     *  stream through here; Range is passed along so audio can seek). */
+    private WebResourceResponse net(String path, Map<String, String> headers) {
+        if (!path.startsWith("/sync/")) return notFound();
+        String range = null;
+        for (Map.Entry<String, String> e : headers.entrySet()) if ("range".equalsIgnoreCase(e.getKey())) range = e.getValue();
+        for (String b : new String[]{Net.current, Net.lan, Net.remote}) {
+            if (b == null || b.isEmpty()) continue;
+            try {
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(b + path).openConnection();
+                c.setConnectTimeout(b.equals(Net.lan) ? 2500 : 8000);
+                c.setReadTimeout(60000);
+                c.setRequestProperty("Authorization", "Bearer " + Net.token);
+                c.setRequestProperty("Accept-Encoding", "identity");
+                if (range != null) c.setRequestProperty("Range", range);
+                int st = c.getResponseCode();
+                if (st == 502 || st == 530) { c.disconnect(); continue; }
+                Map<String, String> h = new HashMap<>();
+                for (String k : new String[]{"Content-Range", "Content-Length", "Accept-Ranges"}) if (c.getHeaderField(k) != null) h.put(k, c.getHeaderField(k));
+                h.put("Cache-Control", "no-store");
+                h.put("Access-Control-Allow-Origin", "*");
+                String type = c.getContentType() == null ? "application/octet-stream" : c.getContentType().split(";")[0];
+                InputStream in = st >= 400 ? c.getErrorStream() : c.getInputStream();
+                return new WebResourceResponse(type, type.startsWith("text") || type.contains("json") ? "utf-8" : null, st,
+                        st == 206 ? "Partial Content" : st < 300 ? "OK" : "Error", h, in == null ? new ByteArrayInputStream(new byte[0]) : in);
+            } catch (IOException ignored) { }
+        }
+        return new WebResourceResponse("text/plain", "utf-8", 503, "Offline", null, new ByteArrayInputStream(new byte[0]));
     }
 
     private static final java.util.regex.Pattern IMG =java.util.regex.Pattern.compile("(?i).*\\.(jpe?g|png|webp|gif|bmp|avif)$");
