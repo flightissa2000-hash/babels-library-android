@@ -249,6 +249,7 @@ async function api(method, path, body) {
   }
   let data = {};
   try { data = JSON.parse(r.text || "{}"); } catch (e) {}
+  if ((r.status === 401 || r.status === 403) && web && method === "GET") return Online.answer(method, path, body);     // (a phone the computer no longer knows: the web still answers)
   if (r.status >= 400) { const e = new Error(data.error || `Error ${r.status}`); e.status = r.status; throw e; }
   if (web) Online.remember(method, path, data);
   return data;
@@ -949,7 +950,8 @@ function swapHtml() {
 
 /* Home → The Bulletin, the computer's weekly magazine on the phone: this week's challenge as the cover story (finish
    something you're partway through, or revisit something finished long ago), Hot Off the Press from the catalogue,
-   Still in the Wrapper (things you own but never opened) and Lab Notes (papers waiting to be read). Picked once a week,
+   Still in the Wrapper (things you own but never opened), and the dailies: Wikipedia's article and Wikiquote's quote of
+   the day. Picked once a week,
    and for whoever's profile is in use. */
 const Bulletin = (() => {
   const DAY = 86400;
@@ -965,9 +967,30 @@ const Bulletin = (() => {
     const f = l && l.finished ? Date.parse(l.finished) / 1000 : 0;
     return f || it.watched_at || (pct(it) >= 98 ? it.opened_at : 0) || 0;
   }
+  /* a series is read in order: whatever volume turns up, the suggestion is the first one on your shelves that you
+     haven't finished */
+  const firstUnread = (it) => {
+    if (!inSeries(it)) return it;
+    const k = seriesKey(it.series);
+    return items().filter((x) => x.has_file && x.kind === it.kind && inSeries(x) && seriesKey(x.series) === k).sort(seriesOrder)
+      .find((x) => W.status(x)[0] !== "done") || it;
+  };
+  // the challenge: a volume you've started is to be finished, one you haven't is to be started
+  function inOrder(it, type, cur, reroll) {
+    if (type === "revisit") return [it, type];
+    const f = firstUnread(it);
+    if (reroll && cur && f.id === cur.id) return [it, type];
+    return [f, W.status(f)[0] === "now" ? "finish" : "start"];
+  }
+  // Still in the Wrapper: the series' first unread volume, and none from a series you're partway through
+  const wrapperPicks = (list) => {
+    const seen = new Set();
+    return list.map(firstUnread).filter((x) => !x.opened_at && W.status(x)[0] === "new" && !seen.has(x.id) && seen.add(x.id));
+  };
   function challenge(reroll = false) {
     const wk = weekStart(), cur = load(file(), null);
-    if (cur && cur.week === wk && !reroll && S.items[cur.id]) return cur;
+    const ci = cur && S.items[cur.id];
+    if (cur && cur.week === wk && !reroll && ci && (cur.type === "revisit" || W.status(ci)[0] === "done" || firstUnread(ci) === ci)) return cur;
     const r = rng(Prof.cur + wk + ":" + ((cur && cur.week === wk ? cur.draw : 0) + (reroll ? 1 : 0)));
     const mine = items().filter((i) => i.has_file && ["book", "graphic", "tv", "movie", "article"].includes(i.kind) && !(cur && cur.id === i.id && reroll));
     const started = mine.filter((i) => W.status(i)[0] === "now");
@@ -978,7 +1001,8 @@ const Bulletin = (() => {
     if (!pools.length) { if (reroll) toast("Nothing else to pick right now: start something and it'll turn up here."); return reroll ? cur : null; }
     let [type, pool] = pools[0];
     if (pools.length > 1 && r() < (reroll ? 0.5 : 0.25)) [type, pool] = pools[1 + Math.floor(r() * (pools.length - 1))];
-    const it = shuffle(pool, r)[0];
+    const [it, kind] = inOrder(shuffle(pool, r)[0], type, cur, reroll);
+    type = kind;
     const c = { week: wk, id: it.id, type, draw: (cur && cur.week === wk ? cur.draw || 0 : 0) + (reroll ? 1 : 0), since: it.opened_at || 0 };
     store(file(), c);
     if (S.conn.token && Prof.server) api("POST", "/sync/bulletin", c).catch(() => {});
@@ -994,8 +1018,7 @@ const Bulletin = (() => {
   function html() {
     const wk = weekStart(), r = rng(Prof.cur + "shelf" + wk);
     const c = challenge(), it = c && S.items[c.id];
-    const papers = shuffle(items().filter((i) => i.kind === "article" && i.has_file && !i.opened_at && !isNewsStory(i)), r).slice(0, 4);
-    const wrapped = shuffle(items().filter((i) => ["book", "graphic", "movie", "tv"].includes(i.kind) && i.has_file && !i.opened_at && !(it && i.id === it.id)), r).slice(0, 6);
+    const wrapped = wrapperPicks(shuffle(items().filter((i) => ["book", "graphic", "movie", "tv"].includes(i.kind) && i.has_file && !i.opened_at), r)).filter((i) => !(it && i.id === it.id)).slice(0, 6);
     const when = new Date(wk * 1000).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
     const issue = Math.max(1, Math.round((wk - Date.UTC(2026, 0, 5) / 1000) / (7 * DAY)) + 1);
     const ch = it ? { it, c, ok: done(c, it), p: pct(it), finish: c.type === "finish", start: c.type === "start", ago: Math.round((now() - finishedAt(it)) / (30 * DAY)) } : null;
@@ -1022,14 +1045,27 @@ const Bulletin = (() => {
       <section class="btm-sec btm-wrap"><header><small>ON YOUR SHELVES</small><h3>Still in the Wrapper</h3><p>Books, comics and films you own but have never opened</p></header>
         ${wrapped.length ? `<div class="btm-velvet">${wrapped.map((x) => `<button class="btm-gem" data-item="${x.id}">${cover(x, false)}<span class="btm-seal">UNOPENED</span><b>${esc(W.title(x))}</b><small>${esc(by(x))}</small></button>`).join("")}</div>`
           : `<p class="hint">You've opened everything on your shelves. Impressive.</p>`}</section>
-      <section class="btm-sec btm-lab"><header><small>FIG. 1 · YOUR READING LIST</small><h3>Lab Notes</h3><p>Scientific papers on your desk, still waiting for a read</p></header>
-        ${papers.length ? `<div class="btm-figs">${papers.map((a, i) => `<button class="btm-fig" data-item="${a.id}"><span class="btm-fignum">FIG. ${i + 1}</span><b>${esc(a.title)}</b><small>${esc([a.journal, a.year].filter(Boolean).join(" · "))}</small></button>`).join("")}</div>`
-          : `<p class="hint">Every paper on your shelves has been read. The lab is quiet.</p>`}</section>
+      <section class="btm-sec btm-tfa" id="btTfa" hidden></section>
+      <section class="btm-sec btm-qotd" id="btQuote" hidden></section>
     </div>`;
   }
   function after() { paintPicks(); paintPotd(); }
   async function paintPotd() {
     if (potd === undefined) { potd = null; try { potd = await api("GET", "/sync/potd"); } catch (e) { potd = undefined; } }
+    // Wikipedia's featured article and Wikiquote's quote of the day
+    const a = potd && potd.article, tf = $("#btTfa");
+    if (a && tf) {
+      tf.innerHTML = `<header><small>FROM THE ENCYCLOPEDIA</small><h3>Today's Article</h3><p>Wikipedia's featured article of the day</p></header>
+        <article class="btm-tfa-page">${a.img ? `<img src="${esc(a.img)}" alt="" onerror="this.remove()">` : ""}<h4>${esc(a.title)}</h4>${a.about ? `<em>${esc(a.about)}</em>` : ""}
+          <p>${esc(a.text)}</p><button class="btn" data-go-url="${esc(a.page)}">Read the whole article →</button></article>`;
+      tf.hidden = false;
+    }
+    const q = potd && potd.quote, qb = $("#btQuote");
+    if (q && qb) {
+      qb.innerHTML = `<header><small>WORDS TO LIVE BY</small><h3>Quote of the Day</h3></header>
+        <blockquote class="btm-q"><p>${esc(q.text)}</p><cite data-go-url="${esc(q.page)}">— ${esc(q.by)}</cite></blockquote>`;
+      qb.hidden = false;
+    }
     const box = $("#btPotd");
     if (!box || !potd || !potd.img) return;
     const img = new Image();

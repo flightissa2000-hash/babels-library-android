@@ -397,9 +397,23 @@ const Online = (() => {
   }
   async function potd() {
     const d = new Date(), iso = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
-    const f = (await web(`https://en.wikipedia.org/api/rest_v1/feed/featured/${iso}`, { json: true })).image;
-    if (!f) return {};
-    return { img: (f.thumbnail || f.image || {}).source, title: f.title, desc: text1(f.description?.text || "", 200), artist: text1(f.artist?.text || "", 60), license: f.license?.type || "", page: f.file_page };
+    const feed = await web(`https://en.wikipedia.org/api/rest_v1/feed/featured/${iso}`, { json: true });
+    const f = feed.image, a = feed.tfa, out = {};
+    if (f) Object.assign(out, { img: (f.thumbnail || f.image || {}).source, title: f.title, desc: text1(f.description?.text || "", 200), artist: text1(f.artist?.text || "", 60), license: f.license?.type || "", page: f.file_page });
+    if (a && a.extract) out.article = { title: a.titles?.normalized || a.title || "", about: a.description || "", text: a.extract.slice(0, 1400), img: a.thumbnail?.source || "", page: a.content_urls?.mobile?.page || "" };
+    try { out.quote = await quoteOfTheDay(d); } catch (e) {}
+    return out;
+  }
+  /* Wikiquote's quote of the day: {text, by, page} */
+  async function quoteOfTheDay(d) {
+    const page = `Wikiquote:Quote_of_the_day/${d.toLocaleString("en-US", { month: "long" })}_${d.getDate()},_${d.getFullYear()}`;
+    const r = await web("https://en.wikiquote.org/w/api.php?" + new URLSearchParams({ action: "parse", page, prop: "text", format: "json", formatversion: 2, origin: "*" }), { json: true });
+    const doc = new DOMParser().parseFromString(r.parse.text, "text/html");
+    const text = (doc.body.textContent || "").replace(/\s+/g, " ").trim();
+    const m = /“\s*(.+?)\s*”\s*[—–]\s*(.+?)\s*$/s.exec(text);
+    if (!m) return null;
+    const q = m[1];
+    return { text: q.slice(0, 900), by: m[2].slice(0, 120), page: "https://en.wikiquote.org/wiki/" + encodeURIComponent(m[2].replace(/ /g, "_")) };
   }
 
   return { handles, answer, remember, flush };
