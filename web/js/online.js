@@ -6,15 +6,28 @@
 const Online = (() => {
   const UA_OK = !!(window.Android && Android.webget);           // the Android app: any site
   const PX = (k) => `https://phys.org/rss-feed/${k}-news/`, SD = (k) => `https://www.sciencedaily.com/rss/${k}.xml`;
+  // research journals, each in its topic (as on the computer: news.py)
+  const J = { prl: "https://feeds.aps.org/rss/recent/prl.xml", nphys: "https://www.nature.com/nphys.rss", quanta: "https://api.quantamagazine.org/feed/",
+    apjl: "https://iopscience.iop.org/journal/rss/2041-8205", natastron: "https://www.nature.com/natastron.rss", cell: "https://www.cell.com/cell/current.rss",
+    elife: "https://elifesciences.org/rss/recent.xml", plosbio: "https://journals.plos.org/plosbiology/feed/atom", nejm: "https://www.nejm.org/action/showFeed?jc=nejm&type=etoc&feed=rss",
+    lancet: "https://www.thelancet.com/rssfeed/lancet_current.xml", jama: "https://jamanetwork.com/rss/site_3/67.xml", natmed: "https://www.nature.com/nm.rss",
+    plosmed: "https://journals.plos.org/plosmedicine/feed/atom", nclimate: "https://www.nature.com/nclimate.rss", sciadv: "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciadv",
+    nchem: "https://www.nature.com/nchem.rss", natmi: "https://www.nature.com/natmachintell.rss", science: "https://www.science.org/rss/news_current.xml" };
   const SCIENCE = [
     ["labs", "Straight from the labs", ["https://news.mit.edu/rss/research", "https://www.nih.gov/news-releases/feed.xml", "https://www.nasa.gov/news-release/feed/",
       "https://www.esa.int/rssfeed/Our_Activities/Space_Science", "https://news.harvard.edu/gazette/section/science-technology/feed/", "https://www.cam.ac.uk/news/feed"]],
-    ["physics", "Physics", [PX("physics"), SD("matter_energy")]], ["space", "Space", [PX("space"), SD("space_time")]],
-    ["life", "Life & biology", [PX("biology"), SD("plants_animals")]], ["health", "Health & medicine", ["https://medicalxpress.com/rss-feed/", SD("health_medicine")]],
-    ["earth", "Earth & climate", [PX("earth"), SD("earth_climate")]], ["chem", "Chemistry & materials", [PX("chemistry"), PX("nanotech")]],
-    ["tech", "Technology & computing", [PX("technology"), SD("computers_math")]],
+    ["physics", "Physics", [PX("physics"), SD("matter_energy"), J.prl, J.nphys, J.quanta]], ["space", "Space", [PX("space"), SD("space_time"), J.apjl, J.natastron]],
+    ["life", "Life & biology", [PX("biology"), SD("plants_animals"), J.cell, J.elife, J.plosbio]],
+    ["health", "Health & medicine", ["https://medicalxpress.com/rss-feed/", SD("health_medicine"), J.nejm, J.lancet, J.jama, J.natmed, J.plosmed]],
+    ["earth", "Earth & climate", [PX("earth"), SD("earth_climate"), J.nclimate, J.sciadv]], ["chem", "Chemistry & materials", [PX("chemistry"), PX("nanotech"), J.nchem]],
+    ["tech", "Technology & computing", [PX("technology"), SD("computers_math"), J.natmi, J.science]],
   ];
-  const OUTLET = { "phys.org": "Phys.org", "medicalxpress.com": "Medical Xpress", "sciencedaily.com": "ScienceDaily", "mit.edu": "MIT News", "nih.gov": "NIH",
+  // (a journal's name for its stories: their links only say the publisher)
+  const FEED_NAME = { [J.prl]: "Physical Review Letters", [J.nphys]: "Nature Physics", [J.quanta]: "Quanta Magazine", [J.apjl]: "Astrophysical Journal Letters",
+    [J.natastron]: "Nature Astronomy", [J.cell]: "Cell", [J.elife]: "eLife", [J.plosbio]: "PLOS Biology", [J.nejm]: "NEJM", [J.lancet]: "The Lancet", [J.jama]: "JAMA",
+    [J.natmed]: "Nature Medicine", [J.plosmed]: "PLOS Medicine", [J.nclimate]: "Nature Climate Change", [J.sciadv]: "Science Advances", [J.nchem]: "Nature Chemistry",
+    [J.natmi]: "Nature Machine Intelligence", [J.science]: "Science" };
+  const OUTLET = { "phys.org": "Phys.org", "techxplore.com": "Tech Xplore", "medicalxpress.com": "Medical Xpress", "sciencedaily.com": "ScienceDaily", "mit.edu": "MIT News", "nih.gov": "NIH",
     "nasa.gov": "NASA", "esa.int": "ESA", "harvard.edu": "Harvard Gazette", "cam.ac.uk": "University of Cambridge" };
   const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 
@@ -55,9 +68,12 @@ const Online = (() => {
     const { text } = await web(url);
     const doc = new DOMParser().parseFromString(text, "text/xml");
     const items = [];
-    for (const it of doc.querySelectorAll("item")) {
-      const get = (sel) => it.getElementsByTagName(sel)[0]?.textContent || "";
-      let title = text1(get("title"), 300); const link = get("link").trim();
+    // RSS 2.0, RSS 1.0 (most journals) and Atom (PLOS)
+    for (const it of doc.querySelectorAll("item, entry")) {
+      const get = (...sels) => { for (const s of sels) { const v = it.getElementsByTagName(s)[0]?.textContent; if (v) return v; } return ""; };
+      let title = text1(get("title"), 300);
+      const al = [...it.getElementsByTagName("link")].find((l) => l.getAttribute("href") && (l.getAttribute("rel") || "alternate") === "alternate");
+      const link = (get("link").trim() || (al ? al.getAttribute("href") : "")).trim();
       if (!title || !link) continue;
       const source = get("source").trim();
       if (source && title.endsWith(" - " + source)) title = title.slice(0, -source.length - 3);
@@ -67,9 +83,9 @@ const Online = (() => {
         if (img) break;
       }
       if (!img) { const m = /<img[^>]+src="([^"]+)"/.exec(get("description") + get("content:encoded")); img = m ? m[1] : ""; }
-      const when = Date.parse(get("pubDate") || get("dc:date")) / 1000 || 0;
-      items.push({ title, link, source: source || outlet(link), by: text1(get("dc:creator"), 80), date: when,
-        summary: url.includes("news.google.com") ? "" : text1(get("description")), image: img.replace("/csz/news/tmb/", "/csz/news/800a/") });
+      const when = Date.parse(get("pubDate", "dc:date", "published", "updated")) / 1000 || 0;
+      items.push({ title, link, source: source || FEED_NAME[url] || outlet(link), by: text1(get("dc:creator", "name"), 80), date: when,
+        summary: url.includes("news.google.com") ? "" : text1(get("description", "summary", "content")), image: img.replace("/csz/news/tmb/", "/csz/news/800a/") });
     }
     feedCache.set(url, { at: now(), items });
     return items;
@@ -87,7 +103,7 @@ const Online = (() => {
   /* ---------------- the News ---------------- */
   async function science(fresh) {
     if (!UA_OK) throw new Error("");
-    const sections = await Promise.all(SCIENCE.map(async ([key, label, urls]) => ({ key, label, items: await many(urls, 24, key === "labs", fresh) })));
+    const sections = await Promise.all(SCIENCE.map(async ([key, label, urls]) => ({ key, label, items: await many(urls, 30, true, fresh) })));
     if (!sections.some((s) => s.items.length)) throw new Error("The newsrooms can't be reached right now.");
     return { sections };
   }
