@@ -70,8 +70,10 @@ const Catalogue = (() => {
         <p id="ctRating" class="hint">${r.rating ? "★ " + (+r.rating).toFixed(1) : ""}</p>
         ${r.have === "owned" ? `<p class="badge">On your shelf</p>` : r.have === "wanted" ? `<p class="badge">✓ On your wishlist</p>` : `<button class="btn primary" data-ct-want="${shown.indexOf(r)}">＋ Add to wishlist</button>`}</div></div>
         <div id="ctAbout">${r.blurb ? `<p>${esc(r.blurb)}</p>` : `<p class="hint">Looking it up…</p>`}</div>
+        <div id="ctSeries"></div>
         <div class="btns" id="ctLinks">${who ? `<button class="btn" data-ct-author="${esc((r.authors || [])[0])}">More by ${esc((r.authors || [])[0])}</button>` : ""}</div></div>`;
     sh.hidden = false; sh.scrollTop = 0;
+    seriesOf(r);
     try {
       const d = await get("info", { title: r.title, author: (r.authors || [])[0] || "", wiki: r.wiki || "", isbn: r.isbn || "", link: r.link || "", al: r.al || "", form: r.form || "" });
       if ($("#sheet").hidden || !$("#ctAbout")) return;
@@ -81,6 +83,24 @@ const Catalogue = (() => {
       const links = [...(d.read || []).map((l) => ({ ...l, label: "📖 Read on " + l.label })), ...(d.links || []), ...(r.link ? [{ label: "See it online", url: r.link }] : [])];
       $("#ctLinks").insertAdjacentHTML("beforeend", links.slice(0, 4).map((l) => `<button class="btn" data-go-url="${esc(l.url)}">${esc(l.label)} ↗</button>`).join(""));
     } catch (e) { if ($("#ctAbout") && !r.blurb) $("#ctAbout").innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
+  }
+
+  // part of a series: every book in it, in order (this one marked; yours and the ones you want too); tap one for its info
+  async function seriesOf(r) {
+    if (!["book", "manga", "comic"].includes(C.cat)) return;
+    let s;
+    try { s = await get("seriesof", { title: r.title, author: (r.authors || [])[0] || "", series: r.series || "", index: r.index ?? "" }); } catch (e) { return; }
+    const box = $("#ctSeries");
+    if (!box || $("#sheet").hidden || !s || !s.books) return;
+    const norm = (t) => String(t || "").toLowerCase().replace(/^(the|a|an)\s+/, "").replace(/[^a-z0-9]+/g, "");
+    const here = (x) => (s.index != null && +x.index === +s.index) || norm(x.title) === norm(r.title);
+    const start = shown.length;
+    shown.push(...s.books.map((x) => ({ ...x, cat: C.cat, series: s.series })));
+    if (!r.series) { const h = box.closest(".ct-info")?.querySelector(".ct-info-top .hint"); if (!h) box.closest(".ct-info")?.querySelector(".ct-info-top h3")?.insertAdjacentHTML("afterend", `<p class="hint">${esc(s.series)}${s.index != null ? " #" + +s.index : ""}</p>`); }
+    box.innerHTML = `<h3 class="ct-ser-h"><small class="ct-ser-k">Part of a series</small>${esc(s.series)} <small>${s.books.length} books</small></h3>
+      <div class="ct-ser-row">${s.books.map((x, i) => `<button class="ct-ser-b ${here(x) ? "here" : ""}" data-ct-info="${start + i}">
+        <span class="ct-ser-c">${x.cover ? `<img loading="lazy" alt="" src="${esc(x.cover)}" onerror="this.remove()">` : ""}<i>${esc(x.title)}</i></span>
+        <b>${x.index != null ? "#" + +x.index + " " : ""}${esc(x.title)}</b><small>${[x.year, x.have === "owned" ? "✓ yours" : x.have === "wanted" ? "wanted" : here(x) ? "this one" : ""].filter(Boolean).join(" · ")}</small></button>`).join("")}</div>`;
   }
 
   async function want(r, btn) {

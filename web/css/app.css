@@ -1304,3 +1304,17 @@ html.eink .btm-q p::after{color:#000!important}
 .rd-body ol{margin:4px 0 0;padding-left:20px;font:400 .95rem/1.5 "Libre Baskerville",Georgia,serif}
 .rd-body li{margin:5px 0}
 .rd-body q{display:block;margin-top:2px;font-style:italic;color:var(--ink-soft);font-size:.85rem}
+
+/* the catalogue's More info: the series a book belongs to */
+.ct-ser-h{margin:18px 0 8px}
+.ct-ser-h small{font-weight:400;font-size:.75rem;color:var(--ink-soft);margin-left:4px}
+.ct-ser-row{display:flex;gap:10px;overflow-x:auto;padding:4px 2px 10px;scrollbar-width:none}
+.ct-ser-row::-webkit-scrollbar{display:none}
+.ct-ser-b{flex:0 0 92px;display:flex;flex-direction:column;gap:3px;padding:0;border:0;background:none;color:var(--ink);text-align:left}
+.ct-ser-c{position:relative;display:grid;place-items:center;width:92px;aspect-ratio:2/3;border-radius:6px;overflow:hidden;background:var(--surface);border:var(--btn-border,1px solid var(--line))}
+.ct-ser-c img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.ct-ser-c i{padding:6px;font-size:.65rem;text-align:center;color:var(--ink-soft)}
+.ct-ser-b b{font-size:.7rem;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ct-ser-b small{font-size:.62rem;color:var(--ink-soft)}
+.ct-ser-b.here .ct-ser-c{outline:3px solid var(--accent);outline-offset:1px}
+.ct-ser-h .ct-ser-k{display:block;margin:0 0 2px;font-weight:800;font-size:.62rem;letter-spacing:.14em;text-transform:uppercase}
