@@ -599,7 +599,7 @@ textarea{font:inherit;color:var(--ink);background:var(--field-bg,var(--surface))
 .db-k i{font-style:normal;opacity:.75;margin-left:6px}
 .db-n{display:block;font-size:2.4rem;font-weight:600;margin-top:14px;line-height:1}
 .db-r{display:block;font-size:.8rem;opacity:.7;margin-top:6px}
-.pc{position:absolute;left:calc(100% - var(--w) - 7%);top:16%;width:var(--w);aspect-ratio:3/4.15;padding:12% 9% 0;border:0;border-radius:3px;
+.pc{position:absolute;left:calc(100% - var(--w) - 7%);top:16%;width:var(--w);aspect-ratio:3/4.15;padding:calc(var(--w) * .24) calc(var(--w) * .18) 0;border:0;border-radius:3px;
   display:flex;flex-direction:column;align-items:center;color:#2b2a27;text-align:center;font-family:"IBM Plex Mono",monospace;
   background:linear-gradient(160deg,#fbf9f2,#ece7da);box-shadow:0 1px 0 #d8d2c2,0 3px 0 -1px #e9e4d6,0 10px 22px rgba(0,0,0,.35);
   transform-origin:11% 6%;will-change:transform,opacity;-webkit-tap-highlight-color:transparent}
@@ -1284,3 +1284,11 @@ html.eink .btm-q p::after{color:#000!important}
 .j-cp-hit b{font-size:.75rem;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .j-cp-hit small{font-size:.65rem;color:var(--ink-soft);display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 .j-head .btn.sm{margin-top:6px}
+
+/* tablets (an iPad, or a phone on its side): the phone's layout kept in proportion rather than stretched across the
+   whole width — the library's deck and the Bulletin's photo at a phone-like size, the catalogue in more columns */
+@media (min-width:700px){
+  .deck{--h:min(60vh,600px);max-width:640px;margin-left:auto;margin-right:auto}
+  .btm-potd{max-width:560px;margin-left:auto;margin-right:auto}
+  .ct-grid{grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:18px 16px}
+}
