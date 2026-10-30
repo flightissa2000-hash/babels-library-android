@@ -977,7 +977,7 @@ function renderHome(v, items) {
 /* Home: the computer's TV & Movies wheel, on the phone. Cards fan out down the left; swipe up and down to turn it, tap a
    card to pick it, tap it again to open it. */
 const W = {
-  sel: 0, list: [], tab: load("hometab.json", "phone"),
+  sel: 0, list: [], tab: "bulletin",            // (the app opens on the Bulletin)
   tabs: { phone: "On this phone", bulletin: "The Bulletin" },
   title: (it) => (it.kind === "tv" ? it.series || it.title : it.title) || "Untitled",
   kindName: (it) => (it.kind === "graphic" ? (it.format === "manga" ? "Manga" : "Comic") : { book: "Book", article: "Article", tv: "TV series", movie: "Film" }[it.kind] || it.kind),
@@ -1134,11 +1134,11 @@ const Bulletin = (() => {
       <figure class="btm-potd" id="btPotd" hidden></figure>
       <section class="btm-sec btm-hot"><header><small>FROM THE CATALOGUE</small><h3>Hot Off the Press</h3><p>This week's most talked-about finds you don't own yet</p></header>
         <div id="btNew" class="btm-ranks"><p class="hint">${S.conn.token ? "Stopping the presses…" : "Pair with your computer to see the catalogue's picks."}</p></div></section>
+      <section class="btm-sec btm-tfa" id="btTfa" hidden></section>
+      <section class="btm-sec btm-qotd" id="btQuote" hidden></section>
       <section class="btm-sec btm-wrap"><header><small>ON YOUR SHELVES</small><h3>Still in the Wrapper</h3><p>Books, comics and films you own but have never opened</p></header>
         ${wrapped.length ? `<div class="btm-velvet">${wrapped.map((x) => `<button class="btm-gem" data-item="${x.id}">${cover(x, false)}<span class="btm-seal">UNOPENED</span><b>${esc(W.title(x))}</b><small>${esc(by(x))}</small></button>`).join("")}</div>`
           : `<p class="hint">You've opened everything on your shelves. Impressive.</p>`}</section>
-      <section class="btm-sec btm-tfa" id="btTfa" hidden></section>
-      <section class="btm-sec btm-qotd" id="btQuote" hidden></section>
     </div>`;
   }
   function after() { paintPicks(); paintPotd(); }

@@ -1268,3 +1268,7 @@ html.eink .btm-q::before,html.eink .btm-q cite,html.eink .btm-qotd header h3,htm
 .sp-row small{color:var(--ink-soft);flex:none}
 .sp-row.first{border-color:var(--accent)}
 .bw-bpick .so{display:grid;place-items:center;width:100%;aspect-ratio:1.6;border-radius:8px;background:var(--surface);border:var(--btn-border,1px solid var(--line));font-style:normal;font-size:1.6rem}
+/* the closing mark, after the quote's last word */
+.btm-q p::after{content:"”";display:inline-block;margin-left:.08em;font:700 4rem/0 "Libre Baskerville",Georgia,serif;font-style:normal;color:#ffb347;opacity:.8;vertical-align:-.66em}
+[data-theme=gruvbox] .btm-q p::after{color:#fabd2f}
+html.eink .btm-q p::after{color:#000!important}
