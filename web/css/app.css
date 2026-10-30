@@ -1208,6 +1208,7 @@ html.bw-on *,html.bw-on *::before,html.bw-on *::after{animation-play-state:pause
 .jx-barinfo span{display:flex;flex-direction:column;min-width:0}
 .jx-barinfo b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .jx-barinfo small{opacity:.75;font-size:.72rem}
+.jx-bar .jx-stop{font-size:.9rem}
 .jx-barfill{position:absolute;left:0;bottom:0;height:3px;background:#ffd23f;width:0}
 body.has-jx #view{padding-bottom:84px}
 html.eink .jx-rec.spin,html.eink .jx-bigrec.spin,html.eink .jx-neon{animation:none}

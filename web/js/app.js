@@ -112,6 +112,8 @@ const Prof = {
         await api("POST", "/sync/profile", { id });
       } catch (e) { return toast(e.offline ? "Switching profiles needs the computer (home Wi-Fi or “from anywhere”)" : e.message); }
       this.cur = id; store("sprofiles.json", { list: this.list, cur: id });
+      if (A && A.setBookmarks) A.setBookmarks("[]");      // (the browser's bookmarks are the profile's: its own come with the sync)
+      renderBrowser.fetched = false;
       S.since = 0; Ann.switched(); loadUnwrapped(); W.sel = 0;
       await sync(true);
       paintProfile(); render();
@@ -505,6 +507,7 @@ function merge(d, made = {}) {
   S.since = d.now;
   if (d.profiles) Prof.fromServer(d.profiles, d.profile);
   if (d.bulletin && d.bulletin.week) Bulletin.fromServer(d.bulletin);
+  if (Array.isArray(d.bookmarks) && A && A.setBookmarks) syncBookmarks(d.bookmarks);
   Prof.apply();          // (what just arrived is the computer's progress: another profile's goes back on top)
   saveLibrary();
 }
@@ -684,7 +687,9 @@ function browserRect() {
   const cut = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--cut")) || 0;      // (the camera hole)
   // tabs hidden: the page has the whole width, and the orange tab floats over it (drawn by the phone, at the same height)
   const nub = !!S.tabsOff;
-  return { x: 0, y: top, w: right, h: innerHeight - top, cut, nub, nubY: S.nubY || 0.5 };
+  const bar = $("#jxBar");      // (the music bar, below the page: its controls stay in reach)
+  const bottom = bar ? Math.round(bar.getBoundingClientRect().top) - 6 : innerHeight;
+  return { x: 0, y: top, w: right, h: bottom - top, cut, nub, nubY: S.nubY || 0.5 };
 }
 function placeBrowser() {
   const o = browserPage();
@@ -695,6 +700,14 @@ function placeBrowser() {
 }
 addEventListener("resize", () => { if (S.tab === "browser" && browserPage()) placeBrowser(); });
 window.Native.browserClosed = () => { if (S.tab === "browser") render(); };
+/* the profile's bookmarks, as the computer has them; ☆ pressed here while it couldn't be reached is sent now */
+function syncBookmarks(list) {
+  let mine = []; try { mine = JSON.parse(A.bookmarks()); } catch (e) {}
+  const have = new Set(list.map((b) => b.url));
+  const waiting = mine.filter((b) => b.pending && !have.has(b.url));
+  A.setBookmarks(JSON.stringify([...list, ...waiting]));
+  for (const b of waiting) api("POST", "/sync/bookmarks", { url: b.url, title: b.title || "" }).then((d) => A.setBookmarks(JSON.stringify(d.items || []))).catch(() => {});
+}
 function renderBrowser(v) {
   const open = browserPage();
   if (open && (open.url || open.alive)) { v.innerHTML = `<div class="bw-hole" id="bwHole"></div>`; return requestAnimationFrame(placeBrowser); }

@@ -1,7 +1,7 @@
 /* Music on the phone: a jukebox. Albums are its selection strips (one per album, not every song), and a player that
    keeps going while you use the rest of the app: a little bar at the bottom, and the full jukebox window with the
-   record turning, shuffle, repeat (all or one) and a queue you can rearrange. Songs on the phone play from the phone;
-   the rest stream from the computer when it can be reached. */
+   record turning, shuffle, repeat (all or one) and a queue you can rearrange. Only songs on the phone play (like
+   everything else, music is got from the computer first: ⬇ on an album or a song). */
 const Jukebox = (() => {
   const J = { tracks: [], order: [], pos: 0, shuffle: false, repeat: "off", ...load("jukebox.json", {}) };
   const audio = new Audio();
@@ -28,7 +28,8 @@ const Jukebox = (() => {
     for (const a of m.values()) a.tracks.sort(trackOrder);
     return [...m.values()];
   }
-  const playable = (it) => onPhone(it) || !!S.conn.token;
+  const playable = (it) => onPhone(it);
+  const getting = (it) => !!S.downloads[it.id];
 
   /* ---------------- the jukebox in the Music area: albums as selection strips, grouped like the library ---------------- */
   function html(groups) {
@@ -45,7 +46,7 @@ const Jukebox = (() => {
         const here = a.tracks.filter(onPhone).length;
         return `<button class="jx-strip" data-jx-album="${albumsNow.length - 1}"><span class="jx-code">${letter}${i + 1}</span>
           <span class="jx-art">${a.cover ? cover(a.cover, false) : `<span class="jx-vinyl"></span>`}</span>
-          <span class="jx-t"><b>${esc(a.title)}</b><small>${esc(a.artist)}${a.year ? " · " + esc(a.year) : ""}</small><small>${a.tracks.length} ${a.tracks.length === 1 ? "song" : "songs"}${here && here < a.tracks.length ? ` · ${here} on this phone` : here ? " · on this phone" : ""}</small></span>
+          <span class="jx-t"><b>${esc(a.title)}</b><small>${esc(a.artist)}${a.year ? " · " + esc(a.year) : ""}</small><small>${a.tracks.length} ${a.tracks.length === 1 ? "song" : "songs"}${here && here < a.tracks.length ? ` · ${here} on this phone` : here ? " · on this phone" : " · not on this phone"}</small></span>
           <span class="jx-go" data-jx-playalbum="${albumsNow.length - 1}" aria-label="Play">▶</span></button>`;
       }).join("")}</div>`);
     });
@@ -68,14 +69,16 @@ const Jukebox = (() => {
   /* an album: its songs, play / shuffle / play next / add to queue */
   function openAlbum(a) {
     const sh = $("#sheet");
+    const missing = a.tracks.filter((t) => !onPhone(t) && !getting(t) && t.has_file).length;
     sh.innerHTML = `<div class="sheet-bar"><button class="back" data-close>‹</button><h2>${esc(a.title)}</h2></div>
       <div class="it-body jx-album"><div class="jx-ahead"><span class="jx-art big">${a.cover ? cover(a.cover, false) : `<span class="jx-vinyl"></span>`}</span>
         <div><h3>${esc(a.title)}</h3><p class="hint">${esc(a.artist)}${a.year ? " · " + esc(a.year) : ""} · ${a.tracks.length} songs</p>
         <div class="btns"><button class="btn primary" data-jx-a="play">▶ Play</button><button class="btn" data-jx-a="shuffle">⤨ Shuffle</button></div>
-        <div class="btns"><button class="btn sm" data-jx-a="next">Play next</button><button class="btn sm" data-jx-a="queue">＋ Queue</button></div></div></div>
-        <ol class="jx-tracks">${a.tracks.map((t, i) => `<li class="${playable(t) ? "" : "off"}"><button class="jx-trk" data-jx-t="${i}"><span class="tn">${t.track || i + 1}</span><span class="tt">${esc(t.title)}</span><span class="td">${t.duration ? fmt(t.duration) : ""}${onPhone(t) ? " 📱" : ""}</span></button>
-          <button class="jx-q" data-jx-tq="${i}" aria-label="Add to queue">＋</button></li>`).join("")}</ol>
-        ${!S.conn.token ? `<p class="hint">Songs marked 📱 are on this phone; the rest play once the phone is paired with the computer.</p>` : `<p class="hint">📱 on this phone · the rest stream from your computer (home Wi-Fi, or “from anywhere”).</p>`}</div>`;
+        <div class="btns"><button class="btn sm" data-jx-a="next">Play next</button><button class="btn sm" data-jx-a="queue">＋ Queue</button></div>
+        ${missing ? `<div class="btns"><button class="btn sm" data-jx-a="get">⬇ Get ${missing === a.tracks.length ? "the album" : `the other ${missing}`} from the computer</button></div>` : ""}</div></div>
+        <ol class="jx-tracks">${a.tracks.map((t, i) => `<li class="${playable(t) ? "" : "off"}"><button class="jx-trk" data-jx-t="${i}"><span class="tn">${t.track || i + 1}</span><span class="tt">${esc(t.title)}</span><span class="td">${t.duration ? fmt(t.duration) : ""}${onPhone(t) ? " 📱" : getting(t) ? " ⏳" : ""}</span></button>
+          ${playable(t) ? `<button class="jx-q" data-jx-tq="${i}" aria-label="Add to queue">＋</button>` : getting(t) ? "" : `<button class="jx-q" data-jx-tget="${i}" aria-label="Get from the computer">⬇</button>`}</li>`).join("")}</ol>
+        <p class="hint">📱 on this phone. Songs play from the phone only: ⬇ gets one (or the whole album) from your computer.</p></div>`;
     sh.hidden = false; sh.scrollTop = 0;
     sh.dataset.jxAlbum = a.key;
     openAlbum.a = a;
@@ -101,7 +104,7 @@ const Jukebox = (() => {
   /* ---------------- playing ---------------- */
   function playList(list, start = 0, shuffle = J.shuffle) {
     list = list.filter(playable);
-    if (!list.length) return toast(S.conn.token ? "Nothing to play." : "Get these songs onto the phone first (or pair with the computer to stream them).");
+    if (!list.length) return toast("None of these songs are on the phone yet: open the album and ⬇ get them from the computer.");
     J.tracks = list.map((t) => t.id);
     J.shuffle = shuffle;
     const idx = J.tracks.map((_, i) => i);
@@ -123,10 +126,12 @@ const Jukebox = (() => {
   async function loadTrack(play) {
     const t = cur();
     if (!t) { audio.pause(); audio.removeAttribute("src"); return changed(); }
-    let src = "";
-    if (onPhone(t)) src = (A && A.mediaUrl && A.mediaUrl(fileName(t))) || (A && A.mediaUrlAsync ? await A.mediaUrlAsync(fileName(t)) : "") || "/local/" + encodeURIComponent(fileName(t));
-    else src = `/net/sync/file/${t.id}`;
-    audio.src = src;
+    if (!onPhone(t)) {          // (taken off the phone since it was queued: skipped)
+      J.order.splice(J.pos, 1);
+      if (J.pos >= J.order.length) { J.pos = 0; J.order = []; J.tracks = []; audio.pause(); audio.removeAttribute("src"); return changed(); }
+      return loadTrack(play);
+    }
+    audio.src = (A && A.mediaUrl && A.mediaUrl(fileName(t))) || (A && A.mediaUrlAsync ? await A.mediaUrlAsync(fileName(t)) : "") || "/local/" + encodeURIComponent(fileName(t));
     if (play) audio.play().catch(() => {});
     change(t.id, { opened_at: now() });
     if ("mediaSession" in navigator) {
@@ -167,13 +172,24 @@ const Jukebox = (() => {
   }
   function paintBar() {
     let b = $("#jxBar");
-    const t = cur();
-    if (!t) { if (b) b.remove(); document.body.classList.remove("has-jx"); return; }
+    const t = cur(), was = !!b;
+    if (!t) { if (b) { b.remove(); document.body.classList.remove("has-jx"); placeBar(true); } return; }
     if (!b) { b = document.createElement("div"); b.id = "jxBar"; b.className = "jx-bar"; document.body.append(b); }
     document.body.classList.add("has-jx");
     b.innerHTML = `<button class="jx-barinfo" data-jx-open>${t.has_cover ? cover(t, false) : `<span class="jx-vinyl"></span>`}<span><b>${esc(t.title)}</b><small>${esc(t.album_artist || (t.authors || [])[0] || "")}</small></span></button>
-      <button class="jx-b" data-jx="prev" aria-label="Previous">⏮</button><button class="jx-b jx-play" data-jx="toggle" aria-label="Play or pause">${audio.paused ? "▶" : "❚❚"}</button><button class="jx-b" data-jx="next" aria-label="Next">⏭</button><i class="jx-barfill" id="jxFill"></i>`;
+      <button class="jx-b" data-jx="prev" aria-label="Previous">⏮</button><button class="jx-b jx-play" data-jx="toggle" aria-label="Play or pause">${audio.paused ? "▶" : "❚❚"}</button><button class="jx-b" data-jx="next" aria-label="Next">⏭</button><button class="jx-b jx-stop" data-jx="stop" aria-label="Stop">■</button><i class="jx-barfill" id="jxFill"></i>`;
+    placeBar(!was);
   }
+  /* the bar sits beside the tabs (never over them), and an open browser page ends above it, so both stay reachable */
+  function placeBar(moved) {
+    const b = $("#jxBar"), tabs = $("#tabs");
+    if (b) {
+      const r = tabs && !S.tabsOff && document.documentElement.dataset.nav !== "drawer" ? tabs.getBoundingClientRect() : null;
+      b.style.right = (r && r.width && r.left > innerWidth / 2 ? Math.round(innerWidth - r.left) + 8 : 8) + "px";
+    }
+    if (moved && typeof placeBrowser === "function") placeBrowser();
+  }
+  addEventListener("resize", () => placeBar(false));
 
   audio.addEventListener("ended", () => next(true));
   audio.addEventListener("play", changed);
@@ -200,8 +216,11 @@ const Jukebox = (() => {
     if (t.closest("[data-jx-open]")) return openNow();
     const a = openAlbum.a;
     const aa = t.closest("[data-jx-a]");
+    if (aa && a && aa.dataset.jxA === "get") { a.tracks.filter((x) => !onPhone(x) && !getting(x) && x.has_file).forEach((x) => getFile(x, true)); toast("Getting the songs from your computer…"); return setTimeout(() => openAlbum(a), 600); }
     if (aa && a) { const k = aa.dataset.jxA; return k === "play" ? playList(a.tracks, 0, false) : k === "shuffle" ? playList(a.tracks, -1, true) : enqueue(a.tracks, k === "next"); }
-    const tr = t.closest("[data-jx-t]"); if (tr && a) return playList(a.tracks, Number(tr.dataset.jxT), false);
+    const tg = t.closest("[data-jx-tget]"); if (tg && a) { getFile(a.tracks[Number(tg.dataset.jxTget)]); return setTimeout(() => openAlbum(a), 600); }
+    const tr = t.closest("[data-jx-t]");
+    if (tr && a) { const x = a.tracks[Number(tr.dataset.jxT)]; if (!playable(x)) return toast(getting(x) ? "Still coming from the computer…" : "Not on the phone yet: ⬇ gets it from the computer."); return playList(a.tracks, a.tracks.filter(playable).indexOf(x), false); }
     const tq = t.closest("[data-jx-tq]"); if (tq && a) return enqueue([a.tracks[Number(tq.dataset.jxTq)]], false);
     const j = t.closest("[data-jx-jump]"); if (j) { J.pos = Number(j.dataset.jxJump); return loadTrack(true); }
     const up = t.closest("[data-jx-up]");
@@ -216,7 +235,7 @@ const Jukebox = (() => {
     else if (k === "shuffle") setShuffle(!J.shuffle);
     else if (k === "repeat") { J.repeat = { off: "all", all: "one", one: "off" }[J.repeat]; toast({ off: "Repeat off", all: "Repeat all", one: "Repeat this song" }[J.repeat]); changed(); }
     else if (k === "clear") { J.order = J.order.slice(0, J.pos + 1); changed(); }
-    else if (k === "stop") { J.tracks = []; J.order = []; J.pos = 0; audio.pause(); audio.removeAttribute("src"); changed(); closeSheet(); }
+    else if (k === "stop") { J.tracks = []; J.order = []; J.pos = 0; audio.pause(); audio.removeAttribute("src"); changed(); if ($("#sheet").dataset.jxNow) closeSheet(); toast("Music stopped"); }
   });
   document.addEventListener("input", (e) => { if (e.target.id === "jxSeek") { audio.currentTime = Number(e.target.value); $("#jxAt").textContent = fmt(audio.currentTime); } });
   // the sheet closing: it's no longer the jukebox window or an album
