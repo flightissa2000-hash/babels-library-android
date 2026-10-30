@@ -43,6 +43,7 @@ public class UploadService extends Service {
         String id, name, state = "waiting", msg = "";
         Uri uri;
         long total, sent;
+        boolean priv;                // "only me": hidden from the computer's other profiles
         volatile boolean cancelled;
     }
 
@@ -50,10 +51,13 @@ public class UploadService extends Service {
     private static Thread worker;
 
     /** Add files to send (from the picker or another app's Share). */
-    static void add(Context c, List<Uri> uris) {
+    static void add(Context c, List<Uri> uris) { add(c, uris, false); }
+
+    static void add(Context c, List<Uri> uris, boolean priv) {
         synchronized (LIST) {
             for (Uri u : uris) {
                 Upload up = new Upload();
+                up.priv = priv;
                 up.id = Long.toHexString(System.nanoTime()) + Integer.toHexString(new Random().nextInt(0xFFFFFF));
                 up.uri = u;
                 up.name = "file";
@@ -226,7 +230,7 @@ public class UploadService extends Service {
                 }
                 u.total = copy.length();
             }
-            String q = "/sync/upload?u=" + u.id + "&name=" + Uri.encode(u.name) + "&total=" + u.total + "&offset=";
+            String q = "/sync/upload?u=" + u.id + "&name=" + Uri.encode(u.name) + "&total=" + u.total + (u.priv ? "&private=1" : "") + "&offset=";
             byte[] buf = new byte[PIECE];
             InputStream in = openAt(u, copy, 0);
             int tries = 0;

@@ -318,8 +318,9 @@ public class MainActivity extends Activity {
         if (uris.isEmpty() && i.getClipData() != null)        // some apps share through the clip data only
             for (int k = 0; k < i.getClipData().getItemCount(); k++) if (i.getClipData().getItemAt(k).getUri() != null) uris.add(i.getClipData().getItemAt(k).getUri());
         if (uris.isEmpty() && i.getData() != null) uris.add(i.getData());
-        if (!uris.isEmpty()) { askToNotify(); UploadService.add(this, uris); }
+        if (!uris.isEmpty()) { askToNotify(); sharedWaiting = uris; js("window.Native && Native.askUploadPrivacy ? Native.askUploadPrivacy() : (Android.sharedPrivacy('public'))"); }
     }
+    private List<Uri> sharedWaiting;      // shared from another app: waiting for "everyone or only me?"
 
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
@@ -346,8 +347,9 @@ public class MainActivity extends Activity {
         } else if (data.getData() != null) {
             uris.add(data.getData());
         }
-        if (!uris.isEmpty()) UploadService.add(this, uris);
+        if (!uris.isEmpty()) UploadService.add(this, uris, pickPrivate);
     }
+    private boolean pickPrivate;          // the files about to be picked: "only me"?
 
     // ------------------------------------------------------------------ what the WebView loads
 
@@ -966,8 +968,19 @@ public class MainActivity extends Activity {
         public void retryUpload(String id) { UploadService.retry(MainActivity.this, id); }
 
         /** Choose files on the phone to add to the computer's library. */
+        /** The answer for files shared in from another app: "public", "private" or "cancel". */
         @JavascriptInterface
-        public void pickFiles() {
+        public void sharedPrivacy(String how) {
+            runOnUiThread(() -> {
+                List<Uri> u = sharedWaiting;
+                sharedWaiting = null;
+                if (u != null && !"cancel".equals(how)) UploadService.add(MainActivity.this, u, "private".equals(how));
+            });
+        }
+
+        @JavascriptInterface
+        public void pickFiles(boolean priv) {
+            pickPrivate = priv;
             askToNotify();
             Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             i.addCategory(Intent.CATEGORY_OPENABLE);

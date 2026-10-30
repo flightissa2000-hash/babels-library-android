@@ -83,7 +83,7 @@
   async function sendUpload(u) {
     u.state = "sending";
     let tries = 0;
-    const q = () => `/sync/upload?u=${u.id}&name=${encodeURIComponent(u.name)}&total=${u.total}&offset=${u.sent}`;
+    const q = () => `/sync/upload?u=${u.id}&name=${encodeURIComponent(u.name)}&total=${u.total}${u.priv ? "&private=1" : ""}&offset=${u.sent}`;
     while (u.sent < u.total) {
       if (u.state === "cancelled") return;
       const r = await Net.call("POST", q(), u.file.slice(u.sent, u.sent + PIECE), 300000, { "Content-Type": "application/octet-stream" });
@@ -225,11 +225,11 @@
     cancelUpload(id) { const u = ups.find((x) => x.id === id); if (u) { u.state = "cancelled"; Net.call("DELETE", "/sync/upload?u=" + id, null); } },
     dismissUpload(id) { const i = ups.findIndex((x) => x.id === id); if (i >= 0) ups.splice(i, 1); },
     retryUpload(id) { const u = ups.find((x) => x.id === id); if (u) { u.state = "waiting"; u.msg = ""; runUploads(); } },
-    pickFiles() {
+    pickFiles(priv) {
       const inp = document.createElement("input");
       inp.type = "file"; inp.multiple = true;
       inp.onchange = () => {
-        for (const f of inp.files) ups.push({ id: "w" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), name: f.name, total: f.size, sent: 0, state: "waiting", msg: "", file: f });
+        for (const f of inp.files) ups.push({ id: "w" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), name: f.name, total: f.size, sent: 0, state: "waiting", msg: "", file: f, priv: !!priv });
         runUploads();
       };
       inp.click();

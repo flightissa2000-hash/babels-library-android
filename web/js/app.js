@@ -1352,6 +1352,17 @@ function paintDownloads() {
 /* files going to the computer: sent by the app's background service (it keeps going when you leave the app), which
    this reads every second while anything is on its way */
 const ACTIVE = ["waiting", "sending", "retrying"];
+/* files going to the computer: with more than one profile, everyone's or this profile's alone? (null: not sending) */
+async function uploadPrivacy() {
+  if (!Prof.server || Prof.list.length < 2) return false;
+  const me = Prof.me();
+  const a = await askKeep("Who can see what you send?", `Everyone: every profile sees it. Only me: just ${me.name}, on this phone and the others ${me.name} uses.`,
+    [[`🔒 Only me (${me.name})`, "private"], ["Everyone", "public"]]);
+  return a == null ? null : a === "private";
+}
+window.Native = window.Native || {};
+// (files shared into the app from another app: the phone asks the same question, then they go)
+window.Native.askUploadPrivacy = () => uploadPrivacy().then((p) => A.sharedPrivacy(p == null ? "cancel" : p ? "private" : "public"));
 function uploadList() { try { return JSON.parse(A ? A.uploads() : "[]"); } catch (e) { return []; } }
 function uploadsHtml() {
   const list = uploadList();
@@ -1821,7 +1832,10 @@ document.addEventListener("click", (e) => {
   const uc = t.closest("[data-up-cancel]"); if (uc) { A.cancelUpload(uc.dataset.upCancel); toast("Cancelling…"); return; }
   const ur = t.closest("[data-up-retry]"); if (ur) { A.retryUpload(ur.dataset.upRetry); return; }
   const ux = t.closest("[data-up-clear]"); if (ux) { A.dismissUpload(ux.dataset.upClear); paintUploads(); return; }
-  if (t.closest("#sendPc")) { if (!S.conn.token) return toast("Pair with your computer first (Settings)."); return A.pickFiles(); }
+  if (t.closest("#sendPc")) {
+    if (!S.conn.token) return toast("Pair with your computer first (Settings).");
+    return uploadPrivacy().then((priv) => { if (priv != null) A.pickFiles(priv); });
+  }
   if (t.closest("#bClear")) { $("#bClearPick").hidden = !$("#bClearPick").hidden; return; }
   const bc = t.closest("[data-bclear]"); if (bc) return clearHistory(bc.dataset.bclear);
   const jr = t.closest("[data-journal]"); if (jr) { const it = S.items[jr.dataset.journal]; return Journal.open(Journal.forItem(it).id); }
