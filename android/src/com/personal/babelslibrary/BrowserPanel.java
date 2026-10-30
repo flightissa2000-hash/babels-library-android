@@ -282,6 +282,8 @@ public class BrowserPanel extends android.content.ContextWrapper {
             progress.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(dark));
         }
         layoutName = t.optString("layout", "standard");
+        swapMode = "swap".equals(t.optString("second", "split"));
+        if (splitBtn != null && webB == null) splitBtn.setText(swapMode ? "⇄" : "⧉");
         paintLeave();
     }
 
@@ -328,7 +330,7 @@ public class BrowserPanel extends android.content.ContextWrapper {
         Button close = closeBtn = barButton("✕", v -> closeTab());
         wikiBtn = barButton("W", v -> wiki());
         saveBtn = barButton("⤓", v -> savePage());
-        splitBtn = barButton("⧉", v -> split());
+        splitBtn = barButton(swapMode ? "⇄" : "⧉", v -> split());
         starBtn = barButton("☆", v -> star());
         keyBtn = barButton("🔑", v -> fillPassword());
         keyBtn.setVisibility(View.GONE);
@@ -817,7 +819,7 @@ public class BrowserPanel extends android.content.ContextWrapper {
     private void setActive(WebView w) {
         if (w == null) return;
         web = w;
-        boolean two = webB != null;
+        boolean two = webB != null && !swapMode;      // (a split view marks the half the bar works on; a swap shows one)
         int pad = two ? dp(3) : 0;
         boxA.setPadding(0, pad, 0, 0);
         boxA.setBackgroundColor(two && w == webA ? markOn : markOff);
@@ -851,7 +853,7 @@ public class BrowserPanel extends android.content.ContextWrapper {
     /** ✕: close the page you're on. In split view just that half (the other one stays); otherwise back to the
      *  browser's start page (the app's Browser tab), not wherever the browser was opened from. */
     private void closeTab() {
-        if (webB != null) { setActive(web == webA ? webB : webA); split(); return; }
+        if (webB != null) { setActive(web == webA ? webB : webA); unsplit(); return; }
         getSharedPreferences("browser", MODE_PRIVATE).edit().remove("open_url").remove("open_title").apply();
         if (onClosed != null) onClosed.run();
     }
@@ -930,8 +932,12 @@ public class BrowserPanel extends android.content.ContextWrapper {
         } catch (Exception e) { toast("Couldn't unlock that password"); }
     }
 
-    /** ⧉: a second page under this one (like Firefox's split view); pressed again, back to one: the half you're using stays. */
+    private boolean swapMode = false;      // the second page: "split" (one above the other) or "swap" (one at a time)
+
+    /** ⧉: a second page under this one (like Firefox's split view); pressed again, back to one: the half you're using stays.
+     *  ⇄ (swap): a second page in place of this one; pressed again, back to the other (✕ closes the one you're on). */
     private void split() {
+        if (swapMode) { swap(); return; }
         if (webB == null) {
             webB = makeWeb();
             boxB = box(webB);
@@ -964,6 +970,37 @@ public class BrowserPanel extends android.content.ContextWrapper {
             address.requestFocus();
             return;
         }
+        unsplit();
+    }
+
+    private void swap() {
+        if (webB == null) {
+            webB = makeWeb();
+            boxB = box(webB);
+            panes.addView(boxB, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+            boxA.setVisibility(View.GONE);
+            setActive(webB);
+            paintSwap();
+            webB.loadDataWithBaseURL("https://babel.invalid/", pickerHtml(), "text/html", "utf-8", null);
+            address.requestFocus();
+            return;
+        }
+        boolean toA = web == webB;
+        boxA.setVisibility(toA ? View.VISIBLE : View.GONE);
+        boxB.setVisibility(toA ? View.GONE : View.VISIBLE);
+        editing = false;
+        address.clearFocus();
+        setActive(toA ? webA : webB);
+        paintSwap();
+    }
+
+    /** ⇄ says which page you're on: 1 or 2 */
+    private void paintSwap() {
+        splitBtn.setText(webB == null ? "⇄" : web == webA ? "⇄1" : "⇄2");
+    }
+
+    /** back to one page: the one you're using stays */
+    private void unsplit() {
         WebView keep = web, drop = web == webA ? webB : webA;
         panes.removeAllViews();
         ((android.view.ViewGroup) keep.getParent()).removeView(keep);
@@ -972,7 +1009,7 @@ public class BrowserPanel extends android.content.ContextWrapper {
         webA = keep; webB = null; boxB = null; divider = null;
         boxA = box(keep);
         panes.addView(boxA, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
-        splitBtn.setText("⧉");
+        splitBtn.setText(swapMode ? "⇄" : "⧉");
         editing = false;
         address.clearFocus();
         setActive(keep);
@@ -998,7 +1035,7 @@ public class BrowserPanel extends android.content.ContextWrapper {
         return "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><style>body{margin:0;padding:18px 16px;font:15px system-ui,sans-serif;background:#f6f7fb;color:#1b2340}"
                 + "h1{font-size:1.15rem;margin:0 0 4px}p{margin:0 0 14px;color:#5b6b86;font-size:.9rem}a{display:flex;flex-direction:column;gap:2px;padding:11px 14px;margin-bottom:8px;border-radius:14px;background:#fff;color:inherit;text-decoration:none;border-left:5px solid " + on + ";box-shadow:0 2px 8px rgba(0,0,0,.08)}"
                 + "b{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}small{color:#7a869e}</style>"
-                + "<h1>The other half</h1><p>Search or type an address in the bar above" + (rows.length() > 0 ? ", or pick one of your latest pages:" : ".") + "</p>" + rows;
+                + "<h1>" + (swapMode ? "Your second page" : "The other half") + "</h1><p>" + "Search or type an address in the bar above" + (rows.length() > 0 ? ", or pick one of your latest pages:" : ".") + "</p>" + rows;
     }
 
     /** The engine pauses a page's video as soon as its window is hidden (screen off, another app): while something

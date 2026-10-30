@@ -30,7 +30,7 @@ function load(name, fallback) { try { const t = A ? A.load(name) : localStorage.
 function store(name, obj) { const t = JSON.stringify(obj); if (A) A.save(name, t); else try { localStorage.setItem(name, t); } catch (e) {} }
 function saveState() {
   store("state.json", { conn: S.conn, since: S.since, lastSync: S.lastSync, theme: S.theme, themeChoice: S.themeChoice, autoGet: S.autoGet, downloads: S.downloads,
-    readMode: S.readMode, search: S.search, nav: S.nav, eink: S.eink, jstyle: S.jstyle, tabsOff: S.tabsOff, blayout: S.blayout, bhome: S.bhome,
+    readMode: S.readMode, search: S.search, nav: S.nav, eink: S.eink, jstyle: S.jstyle, tabsOff: S.tabsOff, blayout: S.blayout, bsecond: S.bsecond, bhome: S.bhome,
     area: S.area, kind: S.kind, groupBy: S.groupBy, groupByArea: S.groupByArea, sort: S.sort, coll: S.coll });
 }
 /* ---------------------------------------------------------------- profiles
@@ -350,7 +350,7 @@ function applyTheme() {
   placeNub();
   if (A && A.setBrowserTheme) {          // the browser screen is native: tell it the theme's colours (and the browser's layout)
     const cs = getComputedStyle(document.documentElement), c = (v) => cs.getPropertyValue(v).trim();
-    A.setBrowserTheme(JSON.stringify({ theme: document.documentElement.dataset.theme, layout: S.blayout, bg: c("--bg"), surface: c("--surface"), ink: c("--ink"), soft: c("--ink-soft"),
+    A.setBrowserTheme(JSON.stringify({ theme: document.documentElement.dataset.theme, layout: S.blayout, second: S.bsecond === "swap" ? "swap" : "split", bg: c("--bg"), surface: c("--surface"), ink: c("--ink"), soft: c("--ink-soft"),
       line: c("--line"), accent: c("--accent"), accentInk: c("--accent-ink"), accent2: c("--accent2") }));
   }
 }
@@ -600,6 +600,57 @@ async function getFile(it, quiet) {
   if (!quiet) toast(`Getting “${it.title}” from your computer…`);
   watchDownloads();
 }
+/* getting one volume of a series (or episode of a show): which of the others come too? Resolves to the items to
+   get (the one tapped first), or null if it's dismissed */
+function pickSeries(it) {
+  const k = inSeries(it) && seriesKey(it.series);
+  const rest = !k ? [] : Object.values(S.items).filter((x) => x.id !== it.id && x.has_file && inSeries(x) && seriesKey(x.series) === k && !onPhone(x) && !S.downloads[x.id]);
+  if (!rest.length) return Promise.resolve([it]);
+  const all = [it, ...rest].sort(seriesOrder);
+  const label = (x) => x.kind === "tv" && x.season != null ? `S${x.season}${x.episode != null ? " E" + x.episode : ""} · ${x.title}` : x.title;
+  return new Promise((done) => {
+    const w = document.createElement("div");
+    w.className = "keep-ask";
+    w.innerHTML = `<form class="ka-card sp-card" role="dialog"><h3>Get more of “${esc(it.series)}”?</h3>
+      <p>Tick what to bring to the phone now (tick a later one and everything in between comes too). The rest can come later.</p>
+      <div class="sp-quick"><button type="button" class="btn sm" data-sp="all">All</button><button type="button" class="btn sm" data-sp="none">Only this one</button></div>
+      <div class="sp-list">${all.map((x) => `<label class="sp-row ${x.id === it.id ? "first" : ""}"><input type="checkbox" value="${x.id}" ${x.id === it.id ? "checked" : ""}><span>${esc(label(x))}</span><small>${x.file_size ? fmtSize(x.file_size) : ""}</small></label>`).join("")}</div>
+      <div class="ka-row"><button class="btn primary" data-sp-go></button><button type="button" class="btn" data-x>Cancel</button></div></form>`;
+    const boxes = [...w.querySelectorAll(".sp-list input")];
+    const picked = () => boxes.filter((b) => b.checked).map((b) => S.items[b.value]);
+    const paint = () => {
+      const p = picked(), size = p.reduce((n, x) => n + (x.file_size || 0), 0);
+      const go = w.querySelector("[data-sp-go]");
+      go.disabled = !p.length;
+      go.textContent = p.length ? `⬇ Get ${p.length === 1 ? "1" : p.length}${size ? " (" + fmtSize(size) + ")" : ""}` : "Tick something to get";
+    };
+    let last = all.indexOf(it);           // (tick one, then another further down: everything between comes too)
+    w.addEventListener("click", (e) => {
+      const q = e.target.closest("[data-sp]");
+      if (q) { boxes.forEach((b) => (b.checked = q.dataset.sp === "all" || Number(b.value) === it.id)); paint(); }
+      if (e.target.closest("[data-x]") || e.target === w) { w.remove(); done(null); }
+    });
+    w.addEventListener("change", (e) => {
+      const i = boxes.indexOf(e.target);
+      if (i < 0) return;
+      if (e.target.checked && last != null && last !== i && boxes[last].checked) {
+        const [a, b] = last < i ? [last, i] : [i, last];
+        for (let j = a; j <= b; j++) boxes[j].checked = true;
+      }
+      last = e.target.checked ? i : null;
+      paint();
+    });
+    w.querySelector("form").onsubmit = (e) => { e.preventDefault(); const p = picked(); w.remove(); done(p.length ? p : null); };
+    paint();
+    document.body.append(w);
+  });
+}
+async function getFiles(list) {
+  const size = list.reduce((n, x) => n + (x.file_size || 0), 0);
+  if (A && list.length > 1 && size && A.freeSpace() < size + 50e6) return toast(`Not enough space on the phone for all ${list.length} (${fmtSize(size)}).`);
+  for (const x of list) await getFile(x, list.length > 1);
+  if (list.length > 1) toast(`Getting ${list.length} from your computer…`);
+}
 function removeFile(it) {
   if (S.downloads[it.id]) { A.cancelDownload(S.downloads[it.id]); delete S.downloads[it.id]; saveState(); }
   A.deleteFile(fileName(it));
@@ -833,7 +884,8 @@ function renderBrowser(v) {
   // the page you left open in the browser (‹ Library or Back keeps it): one tap goes back to it
   v.innerHTML = `<div class="bw-page home-${H}"><div class="bw-top"><button class="btn sm bw-stylebtn" id="bStyle" type="button">🧭 Layout</button></div>
     <div class="bw-stylepick" id="bStylePick" ${S.bPick ? "" : "hidden"}><h4>Start page</h4>${BHOMES.map(([k, n, d]) => `<button class="bw-bpick ${H === k ? "on" : ""}" data-bhpick="${k}"><i class="ho ho-${k}"><b></b></i><b>${n}</b><small>${d}</small></button>`).join("")}
-      ${WEB ? "" : "<h4>Browser controls</h4>"}${WEB ? "" : BLAYOUTS.map(([k, n, d]) => `<button class="bw-bpick ${S.blayout === k ? "on" : ""}" data-blpick="${k}"><i class="lo lo-${k}"><b></b></i><b>${n}</b><small>${d}</small></button>`).join("")}</div>
+      ${WEB ? "" : "<h4>Browser controls</h4>"}${WEB ? "" : BLAYOUTS.map(([k, n, d]) => `<button class="bw-bpick ${S.blayout === k ? "on" : ""}" data-blpick="${k}"><i class="lo lo-${k}"><b></b></i><b>${n}</b><small>${d}</small></button>`).join("")}
+      ${WEB ? "" : `<h4>A second page</h4>${[["split", "⧉", "Split", "Two pages, one above the other"], ["swap", "⇄", "Swap", "One page at a time: the button swaps to the other"]].map(([k, g, n, d]) => `<button class="bw-bpick ${(S.bsecond === "swap" ? "swap" : "split") === k ? "on" : ""}" data-bspick="${k}"><i class="so">${g}</i><b>${n}</b><small>${d}</small></button>`).join("")}`}</div>
     ${start}
     <button class="btn bw-histbtn" id="bHist" type="button">🕘 History</button>
     ${sites.length ? "" : `<p class="bw-nobm">No bookmarks yet. Press ☆ on the browser's bar while you're on a page (here or on your computer) and it shows up here.</p>`}
@@ -841,7 +893,7 @@ function renderBrowser(v) {
       <div><b>🔑 Saved passwords</b><small>${pwN ? `${pwN} saved on this phone, encrypted in its secure keystore. On a site you have one for, 🔑 on the browser's bar fills it in.` : "Import an export from Chrome, Firefox, Edge, Bitwarden, 1Password or LastPass (a .csv file). They're encrypted in this phone's secure keystore."}</small></div>
       <div class="btns"><button class="btn sm" id="pwImport" type="button">Import passwords…</button>${pwN ? `<button class="btn sm danger" id="pwClear" type="button">Remove all</button>` : ""}</div>
     </section>
-    <p class="hint">Ads and pop-ups blocked. ⧉ on the browser's bar splits it in two. Your phone's own password manager (Google, Samsung Pass…) works here too.</p>`}
+    <p class="hint">Ads and pop-ups blocked. ${S.bsecond === "swap" ? "⇄ on the browser's bar opens a second page and swaps between the two (✕ closes the one you're on)." : "⧉ on the browser's bar splits it in two."} Your phone's own password manager (Google, Samsung Pass…) works here too.</p>`}
     <div class="bw-sheet${S.bOpen ? " open" : ""}" id="bSheet">
       <div class="bw-sheet-head"><b>History</b><button class="btn sm" id="bHistClose" type="button" aria-label="Close history">✕</button></div>
       <div class="bw-sheet-body">
@@ -874,6 +926,8 @@ document.addEventListener("click", (e) => {
   }
   const hp = e.target.closest?.("[data-bhpick]");
   if (hp) { S.bhome = hp.dataset.bhpick; S.bPick = false; saveState(); return render(); }
+  const sp = e.target.closest?.("[data-bspick]");
+  if (sp) { S.bsecond = sp.dataset.bspick; S.bPick = false; toast(S.bsecond === "swap" ? "⇄ on the browser's bar now swaps between two pages" : "⧉ on the browser's bar now splits it in two"); saveState(); applyTheme(); return render(); }
   const b = e.target.closest?.("[data-blpick]");
   if (!b) return;
   S.blayout = b.dataset.blpick; S.bPick = false;
@@ -1194,8 +1248,9 @@ function libList() {
   const list = Object.values(S.items).filter((it) => {
     if (!LIB.kinds[area].includes(it.kind)) return false;
     if (S.kind && S.kind !== "all" && !kindMatches(it, S.kind)) return false;
-    if (S.coll === "wish") { if (!(it.wanted && !it.has_file)) return false; }
-    else if (S.coll && !(it.collections || []).map(String).includes(String(S.coll))) return false;
+    const wish = it.wanted && !it.has_file;          // (wanted, not owned: only in the Wishlist, never among what's here)
+    if (S.coll === "wish") { if (!wish) return false; }
+    else if (wish || (S.coll && !(it.collections || []).map(String).includes(String(S.coll)))) return false;
     if (!q) return true;
     const hay = [it.title, (it.authors || []).join(" "), (it.tags || []).join(" "), it.topic, it.genre, it.subject, it.journal, it.year, it.publisher, it.series, it.album, it.album_artist].join(" ").toLowerCase();
     return q.split(/\s+/).every((w) => hay.includes(w));
@@ -1738,7 +1793,14 @@ document.addEventListener("click", (e) => {
   const item = t.closest("[data-item]"); if (item) return openSheet(Number(item.dataset.item));
   if (t.closest("[data-close]")) return closeSheet();
   const op = t.closest("[data-open]"); if (op) return Reader.start(S.items[op.dataset.open]);
-  const get = t.closest("[data-get]"); if (get) { get.disabled = true; return getFile(S.items[get.dataset.get]).then(() => openSheet(Number(get.dataset.get))); }
+  const get = t.closest("[data-get]");
+  if (get) {
+    return pickSeries(S.items[get.dataset.get]).then((list) => {
+      if (!list) return;
+      get.disabled = true;
+      return getFiles(list).then(() => openSheet(Number(get.dataset.get)));
+    });
+  }
   const can = t.closest("[data-cancel]"); if (can) { removeFile(S.items[can.dataset.cancel]); return openSheet(Number(can.dataset.cancel)); }
   const rem = t.closest("[data-remove]"); if (rem) { if (confirm("Remove the file from this phone? It stays on the computer.")) { removeFile(S.items[rem.dataset.remove]); openSheet(Number(rem.dataset.remove)); } return; }
   const w = t.closest("[data-with]"); if (w) { if (!A.openWith(fileName(S.items[w.dataset.with]))) toast("No app on the phone can open this kind of file."); return; }

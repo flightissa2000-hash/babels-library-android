@@ -1257,3 +1257,14 @@ html.eink .btm-q::before,html.eink .btm-q cite,html.eink .btm-qotd header h3,htm
 .only-me{align-items:center}
 .only-me span{display:flex;flex-direction:column;gap:2px}
 .only-me small{font-size:.8rem}
+
+/* getting more of a series */
+.sp-card{max-height:86vh;display:flex;flex-direction:column}
+.sp-quick{display:flex;gap:8px;margin:0 0 8px}
+.sp-list{overflow:auto;flex:1;min-height:0;margin:0 0 12px;display:grid;gap:4px}
+.sp-row{display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:var(--radius-sm,10px);border:var(--btn-border,1px solid var(--line))}
+.sp-row input{width:20px;height:20px;flex:none}
+.sp-row span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sp-row small{color:var(--ink-soft);flex:none}
+.sp-row.first{border-color:var(--accent)}
+.bw-bpick .so{display:grid;place-items:center;width:100%;aspect-ratio:1.6;border-radius:8px;background:var(--surface);border:var(--btn-border,1px solid var(--line));font-style:normal;font-size:1.6rem}
