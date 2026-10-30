@@ -98,14 +98,16 @@ final class Dictation implements RecognitionListener {
         return r == null || r.isEmpty() ? "" : r.get(0);
     }
 
-    /** a session ended (a pause, or stop()): carry on listening while dictation is on */
-    private void ended() {
+    /** a session ended (a pause, a hiccup, or stop()): carry on listening while dictation is on (after a hiccup, a
+     *  moment later, longer each time) */
+    private void ended() { ended(120); }
+    private void ended(long wait) {
         listening = false;
-        if (on) ui.postDelayed(() -> { if (on && !listening) listen(); }, 120);
+        if (on) ui.postDelayed(() -> { if (on && !listening) listen(); }, wait);
         else emit("state", "off");
     }
 
-    @Override public void onReadyForSpeech(Bundle b) { emit("state", "listening"); }
+    @Override public void onReadyForSpeech(Bundle b) { errors = 0; emit("state", "listening"); }
     @Override public void onBeginningOfSpeech() { }
     @Override public void onRmsChanged(float rms) {
         long now = System.currentTimeMillis();
@@ -115,7 +117,7 @@ final class Dictation implements RecognitionListener {
     }
     @Override public void onBufferReceived(byte[] buffer) { }
     @Override public void onEndOfSpeech() { }
-    @Override public void onPartialResults(Bundle b) { String t = best(b); if (!t.isEmpty()) emit("partial", t); }
+    @Override public void onPartialResults(Bundle b) { String t = best(b); if (!t.isEmpty()) { errors = 0; emit("partial", t); } }
     @Override public void onEvent(int type, Bundle b) { }
 
     @Override public void onResults(Bundle b) {
@@ -126,17 +128,20 @@ final class Dictation implements RecognitionListener {
     }
 
     @Override public void onError(int code) {
+        // a pause with nothing said, or the recognizer still busy: just listen again. Anything else (the speech
+        // service dropping its connection, which Samsung's does now and then) is tried again a moment later; only
+        // when it keeps failing, with nothing heard in between, does dictation stop
         boolean quiet = code == SpeechRecognizer.ERROR_NO_MATCH || code == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
                 || code == SpeechRecognizer.ERROR_CLIENT || code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY;
         if (code == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
             on = false;
             emit("error", "Babel's Library needs the microphone to take dictation.");
-        } else if (!quiet && on && ++errors >= 3) {
+        } else if (!quiet && on && ++errors >= 8) {
             on = false;
             emit("error", code == SpeechRecognizer.ERROR_NETWORK || code == SpeechRecognizer.ERROR_NETWORK_TIMEOUT
                     ? "Dictation needs a connection (or the offline speech pack for your language)." : "Dictation stopped (speech error " + code + ").");
         }
-        if (code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY && rec != null) { rec.destroy(); rec = null; }
-        ended();
+        if ((code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || !quiet) && rec != null) { rec.destroy(); rec = null; }    // (a fresh one)
+        ended(quiet ? 120 : Math.min(3000, 400L * errors));
     }
 }

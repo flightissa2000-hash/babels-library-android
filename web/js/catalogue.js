@@ -21,7 +21,6 @@ const Catalogue = (() => {
     const head = `<div class="ct-head"><div class="ct-mast"><small>Babel's</small><b>Big ${esc(DEPTS.find((d) => d[0] === C.cat)[1].replace(/s$/, "").replace("Film", "Film"))} Catalogue</b></div>
       <div class="chips ct-depts">${DEPTS.map(([k, n]) => `<button data-ct-cat="${k}" class="${C.cat === k ? "on" : ""}">${n}</button>`).join("")}</div>
       <div class="ct-views">${VIEWS.map(([k, n]) => `<button data-ct-view="${k}" class="${C.view === k ? "on" : ""}">${n}${k === "wish" && wished().length ? ` <i>${wished().length}</i>` : ""}</button>`).join("")}</div></div>`;
-    if (!S.conn.token) { v.innerHTML = head + note("Pair with your computer first (Settings)."); return; }
     const id = ++C.seq;
     const fill = (html) => { if (id === C.seq && S.tab === "catalogue") { const b = $("#ctBody"); if (b) b.innerHTML = html; } };
     if (C.view === "search") {
@@ -86,10 +85,10 @@ const Catalogue = (() => {
 
   async function want(r, btn) {
     try {
-      await api("POST", "/sync/cat/wish", r);
+      const res = await api("POST", "/sync/cat/wish", r);
       r.have = "wanted";
       if (btn) btn.outerHTML = `<span class="ct-tag got">✓ Wanted</span>`;
-      toast("Added to your wishlist");
+      toast(res.queued ? "On your wishlist (the computer gets it next time it's reached)" : "Added to your wishlist");
       sync();
     } catch (e) { toast(e.message); }
   }

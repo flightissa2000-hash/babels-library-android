@@ -246,6 +246,10 @@
     setBrowserTheme() {},
     openBrowser(url) {
       if (!url) return;
+      // words typed on the start page are a search (DuckDuckGo), an address without https:// gets one; the same
+      // as the Android browser does (otherwise Safari took the words for a page of this site: GitHub's 404)
+      const t = String(url).trim();
+      if (!/^https?:\/\//i.test(t)) url = !/\s/.test(t) && /^[\w-]+(\.[\w-]+)+(:\d+)?(\/.*)?$/.test(t) ? "https://" + t : "https://duckduckgo.com/?q=" + encodeURIComponent(t);
       try {
         const h = JSON.parse(kv.get("history.json") || "[]");
         h.push({ url, title: url.replace(/^https?:\/\/(www\.)?/, ""), t: Math.floor(Date.now() / 1000) });

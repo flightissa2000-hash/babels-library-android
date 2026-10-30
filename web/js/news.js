@@ -22,7 +22,6 @@ const NewsTab = (() => {
     shown = [];
     const head = `<div class="nz-mast"><b>The Babel Gazette</b><small>${esc(new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" }))}</small>
       <div class="nz-desks"><button data-nz-desk="science" class="${N.desk === "science" ? "on" : ""}">Science</button><button data-nz-desk="local" class="${N.desk === "local" ? "on" : ""}">Local</button></div></div>`;
-    if (!S.conn.token) { v.innerHTML = head + note("Pair with your computer first (Settings)."); return; }
     const fill = (html) => { if (id === N.seq && S.tab === "news") v.innerHTML = head + html; };
     if (N.desk === "science") {
       if (!N.sci) { fill(note("The presses are rolling…")); try { N.sci = await api("GET", "/sync/news/science" + (N.fresh ? "?fresh=1" : "")); N.fresh = false; } catch (e) { return fill(note(esc(e.message))); } }

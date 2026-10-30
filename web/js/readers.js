@@ -56,6 +56,7 @@ Object.assign(window.Reader, (() => {
 
   async function start(it) {
     if (!it) return;
+    if (it.kind === "music" && window.Jukebox) return Jukebox.playItem(it);       // songs play in the jukebox (it keeps going)
     if (!onPhone(it)) return toast("Get the file from your computer first.");
     if (R) close(true);
     const name = fileName(it), url = "/local/" + encodeURIComponent(name), ext = (it.file_type || "").toLowerCase();
@@ -516,7 +517,7 @@ Object.assign(window.Reader, (() => {
     const box = document.createElement("div");
     box.className = "r-epub";
     st.appendChild(box);
-    const th = ((window.THEMES || {})[document.documentElement.dataset.theme] || {}).reader || { bg: "#fff", ink: "#222", font: "serif" };
+    const th = S.eink ? { bg: "#fff", ink: "#000", font: "Georgia, serif" } : ((window.THEMES || {})[document.documentElement.dataset.theme] || {}).reader || { bg: "#fff", ink: "#222", font: "serif" };   // (e-reader mode: black on white)
     $("#reader").style.background = th.bg;
     const data = await (await fetch(R.url)).arrayBuffer();
     const book = ePub(data);

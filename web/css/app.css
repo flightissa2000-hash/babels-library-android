@@ -1119,3 +1119,95 @@ html[data-nav=folders] .hw-swap{--tabs-w:46px}
 .bw-resume em{font-style:normal;font-size:.74rem;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* the Browser tab while a page is open: the browser itself is laid over this space */
 .bw-hole{position:absolute;inset:0;background:var(--bg)}
+/* the video's skip buttons: over the picture, only while the bars are showing (a tap on the video), not taking room */
+.v-skips{position:absolute;left:0;right:0;bottom:calc(64px + env(safe-area-inset-bottom));z-index:4;padding:6px;transition:opacity .2s}
+.reader.calm .v-skips{opacity:0;pointer-events:none}
+.v-skip{background:rgba(0,0,0,.55)}
+
+/* e-reader mode (Settings → Look): for e-ink screens. Nothing moves (every animation and transition is a smear of
+   ghosting there), no shadows, blurs or gradients, and the reader is plain black on white */
+html.eink *,html.eink *::before,html.eink *::after{animation:none!important;transition:none!important;box-shadow:none!important;text-shadow:none!important;backdrop-filter:none!important;filter:none!important}
+html.eink{--bg:#fff;--surface:#fff;--ink:#000;--ink-soft:#333;--line:#000;--accent:#000;--accent-ink:#fff;--accent2:#000;--hl-yellow:#ddd;--hl-green:#bbb;--hl-blue:#999;--hl-pink:#777}
+html.eink body,html.eink .top,html.eink .tabs,html.eink .panel,html.eink .sheet{background:#fff!important;color:#000!important;background-image:none!important}
+html.eink .reader{background:#fff;color:#000}
+html.eink .r-bar,html.eink .r-foot{background:#fff;color:#000;border-bottom:1px solid #000}
+html.eink .r-bar button,html.eink .r-foot{color:#000}
+html.eink .ss-bg,html.eink .btm-bg,html.eink .btm-sheen,html.eink .hw-swap-disc{display:none!important}
+/* while a web page shows on the Browser tab, the app behind it stops animating (it only costs the video smoothness) */
+html.bw-on *,html.bw-on *::before,html.bw-on *::after{animation-play-state:paused!important}
+
+/* the journal's two notebooks */
+.j-books{display:flex;gap:0;margin:0 0 10px;border-radius:12px;overflow:hidden;border:1px solid var(--line,rgba(127,127,127,.3))}
+.j-books button{flex:1;padding:10px 6px;border:0;background:none;color:inherit;font:inherit;font-weight:600}
+.j-books button.on{background:var(--accent,#c96);color:var(--on-accent,#fff)}
+.j-wsub{margin:0 2px 10px}
+
+/* a series in the deck: one card with the rest of its volumes peeking out behind */
+.pc.stack{box-shadow:5px -5px 0 -1px var(--card-2,#ece6d8),5px -5px 0 0 rgba(0,0,0,.18),10px -10px 0 -1px var(--card-3,#e2dac8),10px -10px 0 0 rgba(0,0,0,.14),0 6px 16px rgba(0,0,0,.25)}
+.series-shelf{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:12px}
+.series-shelf .card{width:auto}
+.series-shelf .card.seen{opacity:.7}
+
+/* ---------------- music: the jukebox ---------------- */
+.jukebox{position:relative;margin:8px 0 90px;padding:0 10px 18px;border-radius:120px 120px 18px 18px;background:linear-gradient(#7a3b1d,#4a1f0e);box-shadow:inset 0 0 0 6px #c99a3b,inset 0 0 0 10px #5a2812,0 10px 30px rgba(0,0,0,.35);color:#fff3d6}
+.jx-arch{position:relative;text-align:center;padding:34px 10px 10px}
+.jx-neon{position:absolute;left:18px;right:18px;top:12px;height:60px;border-radius:90px 90px 0 0;border:5px solid #ff4f8b;border-bottom:0;box-shadow:0 0 10px #ff4f8b,inset 0 0 10px #ff4f8b;animation:jxhue 6s linear infinite}
+@keyframes jxhue{to{filter:hue-rotate(360deg)}}
+.jx-arch b{display:block;font:900 1.9rem/1 Georgia,serif;letter-spacing:.2em;color:#ffd98a;text-shadow:0 0 10px #ff9d3b}
+.jx-arch small{letter-spacing:.35em;font-size:.62rem;opacity:.85}
+.jx-window{display:flex;align-items:center;gap:10px;margin:8px 4px;padding:10px;border-radius:14px;background:radial-gradient(#2a1a10,#120a06);box-shadow:inset 0 0 0 3px #c99a3b,inset 0 0 18px rgba(255,200,120,.25);min-height:72px;flex-wrap:wrap}
+.jx-idle{width:100%;text-align:center;opacity:.8;font-style:italic}
+.jx-rec{flex:0 0 56px;height:56px;border-radius:50%;background:repeating-radial-gradient(#111 0 2px,#222 2px 4px);display:grid;place-items:center;overflow:hidden;box-shadow:0 0 0 2px #000}
+.jx-rec .cov{width:24px;height:24px;border-radius:50%;overflow:hidden}
+.jx-rec.spin,.jx-bigrec.spin{animation:jxspin 2.4s linear infinite}
+@keyframes jxspin{to{transform:rotate(360deg)}}
+.jx-np{flex:1;min-width:120px;display:flex;flex-direction:column}
+.jx-np small{opacity:.75;font-size:.7rem;letter-spacing:.06em}
+.jx-mini{display:flex;gap:2px;width:100%;justify-content:center}
+.jx-b{background:none;border:0;color:inherit;font-size:1.25rem;width:44px;height:44px;border-radius:50%;cursor:pointer}
+.jx-b.on{color:#ffd23f;text-shadow:0 0 8px #ffb000}
+.jx-b.jx-play{background:#ffd98a;color:#4a1f0e;font-size:1.1rem}
+.jx-dial{display:flex;gap:8px;justify-content:center;margin:6px 0 10px}
+.jx-dial .btn{background:#c99a3b;color:#2b1206;border:0}
+.jx-cards{background:#f7ecd2;color:#2b1206;border-radius:10px;padding:8px;box-shadow:inset 0 0 0 3px #c99a3b}
+.jx-row{margin-bottom:6px}
+.jx-rowname{display:flex;gap:8px;align-items:center;font-weight:700;font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;padding:6px 4px}
+.jx-rowname b{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#b8321b;color:#fff}
+.jx-strip{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:0;margin:0 0 5px;padding:6px 8px;border-radius:6px;background:#fffaf0;color:inherit;border-left:6px solid #b8321b;box-shadow:0 1px 0 rgba(0,0,0,.15);font:inherit}
+.jx-code{font:700 .8rem ui-monospace,monospace;color:#b8321b;min-width:30px}
+.jx-art{flex:0 0 46px;height:46px;border-radius:4px;overflow:hidden;background:#222}
+.jx-art.big{flex-basis:120px;width:120px;height:120px}
+.jx-art .cov{width:100%;height:100%}
+.jx-vinyl{display:block;width:100%;height:100%;background:repeating-radial-gradient(#111 0 2px,#262626 2px 4px)}
+.jx-t{flex:1;min-width:0;display:flex;flex-direction:column}
+.jx-t b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jx-t small{opacity:.7;font-size:.75rem}
+.jx-go{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:#b8321b;color:#fff;font-size:.9rem;flex:0 0 36px}
+.jx-grille{height:38px;margin-top:12px;border-radius:8px;background:repeating-linear-gradient(90deg,#c99a3b 0 4px,#3a180a 4px 10px)}
+.jx-ahead{display:flex;gap:14px;align-items:flex-start}
+.jx-tracks,.jx-queue{list-style:none;padding:0;margin:12px 0}
+.jx-tracks li,.jx-queue li{display:flex;align-items:center;gap:4px;border-bottom:1px solid var(--line,rgba(127,127,127,.25))}
+.jx-tracks li.off{opacity:.45}
+.jx-trk,.jx-qgo{flex:1;display:flex;gap:10px;align-items:center;padding:10px 4px;background:none;border:0;color:inherit;font:inherit;text-align:left}
+.jx-qgo{flex-direction:column;align-items:flex-start;gap:0}
+.jx-qgo small{opacity:.7}
+.jx-trk .tn{width:24px;opacity:.6}.jx-trk .tt{flex:1}.jx-trk .td{opacity:.6;font-size:.85rem}
+.jx-q{background:none;border:0;color:inherit;width:36px;height:36px;font-size:1rem}
+.jx-now{text-align:center}
+.jx-bigrec{position:relative;width:min(70vw,280px);aspect-ratio:1;margin:10px auto 14px;border-radius:50%;background:repeating-radial-gradient(#0b0b0b 0 2px,#202020 2px 4px);display:grid;place-items:center;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.jx-bigrec .cov{width:40%;height:40%;border-radius:50%;overflow:hidden}
+.jx-bigrec i{position:absolute;width:10px;height:10px;border-radius:50%;background:#ddd}
+#jxSeek{width:100%}
+.jx-times{display:flex;justify-content:space-between;font-size:.8rem;opacity:.7}
+.jx-ctl{display:flex;justify-content:center;gap:6px;margin:8px 0 14px}
+.jx-ctl .jx-b{width:52px;height:52px}
+.jx-qh{display:flex;justify-content:space-between;align-items:center;text-align:left}
+.jx-bar{position:fixed;left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:60;display:flex;align-items:center;gap:2px;padding:6px 8px;border-radius:14px;background:linear-gradient(#5a2812,#3a180a);color:#fff3d6;box-shadow:0 6px 20px rgba(0,0,0,.35),inset 0 0 0 2px #c99a3b;overflow:hidden}
+.jx-barinfo{flex:1;min-width:0;display:flex;align-items:center;gap:8px;background:none;border:0;color:inherit;font:inherit;text-align:left}
+.jx-barinfo .cov,.jx-barinfo .jx-vinyl{width:38px;height:38px;flex:0 0 38px;border-radius:4px;overflow:hidden}
+.jx-barinfo span{display:flex;flex-direction:column;min-width:0}
+.jx-barinfo b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jx-barinfo small{opacity:.75;font-size:.72rem}
+.jx-barfill{position:absolute;left:0;bottom:0;height:3px;background:#ffd23f;width:0}
+body.has-jx #view{padding-bottom:84px}
+html.eink .jx-rec.spin,html.eink .jx-bigrec.spin,html.eink .jx-neon{animation:none}

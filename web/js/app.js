@@ -30,21 +30,24 @@ function load(name, fallback) { try { const t = A ? A.load(name) : localStorage.
 function store(name, obj) { const t = JSON.stringify(obj); if (A) A.save(name, t); else try { localStorage.setItem(name, t); } catch (e) {} }
 function saveState() {
   store("state.json", { conn: S.conn, since: S.since, lastSync: S.lastSync, theme: S.theme, themeChoice: S.themeChoice, autoGet: S.autoGet, downloads: S.downloads,
-    readMode: S.readMode, search: S.search, nav: S.nav, jstyle: S.jstyle, tabsOff: S.tabsOff, blayout: S.blayout, bhome: S.bhome,
+    readMode: S.readMode, search: S.search, nav: S.nav, eink: S.eink, jstyle: S.jstyle, tabsOff: S.tabsOff, blayout: S.blayout, bhome: S.bhome,
     area: S.area, kind: S.kind, groupBy: S.groupBy, groupByArea: S.groupByArea, sort: S.sort, coll: S.coll });
 }
 /* ---------------------------------------------------------------- profiles
-   Several people can share this phone, each with their own place in every book and film. The first profile ("main")
-   is the one kept in step with the computer; the others keep their progress on this phone only (progress-<id>.json).
-   While another profile is chosen, each item shows that profile's progress and the computer's waits in it._m. */
+   The computer keeps the profiles (everyone who uses the library): the phone is logged in as one of them and sees its
+   places, notes, journal and Bulletin, and nothing another profile hid. Switching asks the computer (a full sync).
+   (Before that, a phone kept its own extra profiles, their progress on the phone only, in progress-<id>.json:
+   those are brought to the computer as profiles of their own the first time it answers.) */
 const PF = ["progress", "last_location", "watched", "watched_at", "opened_at", "audio_pos"];
 const PF0 = { progress: 0, last_location: null, watched: 0, watched_at: null, opened_at: null, audio_pos: null };
 const FACES = ["🦉", "🦊", "🐢", "🐙", "🦄", "🐝", "🐸", "🦖", "🐧", "🌵", "🍄", "🚀"];
 const Prof = {
-  list: [], cur: "main", marks: {},
-  isMain() { return this.cur === "main"; },
+  list: [], cur: "main", marks: {}, server: false,
+  isMain() { return this.server || this.cur === "main"; },
   me() { return this.list.find((p) => p.id === this.cur) || this.list[0]; },
   load() {
+    const sv = load("sprofiles.json", null);
+    if (sv && sv.list && sv.list.length) { this.server = true; this.list = sv.list; this.cur = sv.cur; this.marks = {}; return; }
     this.list = load("profiles.json", null) || [{ id: "main", name: "Me", face: "🦉" }];
     this.cur = load("profile.json", "main");
     if (!this.list.some((p) => p.id === this.cur)) this.cur = "main";
@@ -71,7 +74,49 @@ const Prof = {
     Object.assign(this.marks[id] = this.marks[id] || {}, fields);
     store(`progress-${this.cur}.json`, this.marks);
   },
-  switchTo(id) {
+  /* the computer's answer: its profiles, and which one this phone is */
+  fromServer(list, cur) {
+    if (!list || !list.length) return;
+    const old = this.server ? [] : this.list.filter((p) => p.id !== "main");
+    if (!this.server && !this.isMain()) { this.cur = "main"; this.marks = {}; this.apply(); }
+    const changed = !this.server || this.cur !== cur || JSON.stringify(this.list) !== JSON.stringify(list);
+    this.server = true; this.list = list; this.cur = cur;
+    store("sprofiles.json", { list, cur });
+    if (old.length) setTimeout(() => this.migrate(old), 500);
+    if (changed) paintProfile();
+  },
+  async migrate(old) {
+    for (const p of old) {
+      try {
+        const have = this.list.find((x) => x.name.toLowerCase() === p.name.toLowerCase());
+        const id = have ? have.id : (await api("POST", "/sync/profiles", { name: p.name, face: p.face })).profile.id;
+        const t = now(), marks = load(`progress-${p.id}.json`, {}), anns = load(`anns-${p.id}.json`, {});
+        const ops = [];
+        for (const [iid, f] of Object.entries(marks)) for (const [field, value] of Object.entries(f)) ops.push({ id: Number(iid), field, value, ts: t });
+        const aops = Object.values(anns).map((a) => ({ op: "add", cid: String(a.id).replace(/^c:/, ""), item_id: a.item_id, title: a.title, note: a.note, quote: a.quote, color: a.color, locator: a.locator }));
+        if (ops.length || aops.length) await api("POST", "/sync/push", { ops, aops, now: t, profile: id });
+        store(`progress-${p.id}.json`, {}); store(`anns-${p.id}.json`, {});
+      } catch (e) { return; }           // (tried again next time)
+    }
+    store("profiles.json", null);
+    const r = await api("GET", "/sync/profiles").catch(() => null);
+    if (r) this.fromServer(r.profiles, r.current);
+  },
+  async switchTo(id) {
+    if (this.server) {
+      if (!S.conn.token) return toast("Pair with the computer first");
+      if (Reader.open) Reader.close();
+      toast("Switching…");
+      try {
+        await sync();                    // (what this profile changed here goes first)
+        await api("POST", "/sync/profile", { id });
+      } catch (e) { return toast(e.offline ? "Switching profiles needs the computer (home Wi-Fi or “from anywhere”)" : e.message); }
+      this.cur = id; store("sprofiles.json", { list: this.list, cur: id });
+      S.since = 0; Ann.switched(); loadUnwrapped(); W.sel = 0;
+      await sync(true);
+      paintProfile(); render();
+      return toast(`${this.me().face} ${this.me().name}'s library`);
+    }
     if (Reader.open) Reader.close();
     saveLibrary();
     this.cur = id;
@@ -85,7 +130,16 @@ const Prof = {
     render();
     toast(`${this.me().face} ${this.me().name}'s library`);
   },
-  add(name) {
+  async rename(id, fields) {           // (on the computer's list)
+    const r = await api("POST", "/sync/profile", { edit: id, ...fields });
+    this.fromServer(r.profiles, r.current);
+  },
+  async add(name) {
+    if (this.server) {
+      const r = await api("POST", "/sync/profiles", { name, face: FACES[this.list.length % FACES.length] });
+      this.fromServer(r.profiles, this.cur);
+      return r.profile;
+    }
     const p = { id: "p" + Date.now().toString(36), name, face: FACES[this.list.length % FACES.length] };
     this.list.push(p); this.saveList();
     return p;
@@ -108,8 +162,12 @@ document.addEventListener("click", async (e) => {
     return;
   }
   const f = t.closest("[data-prof-face]");
-  if (f) { const p = Prof.list.find((x) => x.id === f.dataset.profFace); p.face = FACES[(FACES.indexOf(p.face) + 1) % FACES.length]; Prof.saveList(); paintProfile(); f.textContent = p.face; return; }
-  const u = t.closest("[data-prof-use]"); if (u) return Prof.switchTo(u.dataset.profUse);
+  if (f) {
+    const p = Prof.list.find((x) => String(x.id) === f.dataset.profFace); p.face = FACES[(FACES.indexOf(p.face) + 1) % FACES.length];
+    if (Prof.server) Prof.rename(p.id, { face: p.face }).catch((err) => toast(err.message)); else Prof.saveList();
+    paintProfile(); f.textContent = p.face; return;
+  }
+  const u = t.closest("[data-prof-use]"); if (u) return Prof.switchTo(Prof.server ? Number(u.dataset.profUse) : u.dataset.profUse);
   const d = t.closest("[data-prof-del]");
   if (d) {
     const p = Prof.list.find((x) => x.id === d.dataset.profDel);
@@ -119,15 +177,20 @@ document.addEventListener("click", async (e) => {
 document.addEventListener("change", (e) => {
   const n = e.target.closest("[data-prof-name]");
   if (!n) return;
-  const p = Prof.list.find((x) => x.id === n.dataset.profName);
-  if (p) { p.name = n.value.trim() || p.name; n.value = p.name; Prof.saveList(); paintProfile(); }
+  const p = Prof.list.find((x) => String(x.id) === n.dataset.profName);
+  if (p) {
+    p.name = n.value.trim() || p.name; n.value = p.name;
+    if (Prof.server) Prof.rename(p.id, { name: p.name }).catch((err) => toast(err.message)); else Prof.saveList();
+    paintProfile();
+  }
 });
-document.addEventListener("submit", (e) => {
+document.addEventListener("submit", async (e) => {
   if (e.target.id !== "profAdd") return;
   e.preventDefault();
   const name = $("#profNew").value.trim();
   if (!name) return toast("Type a name first");
-  const p = Prof.add(name);
+  let p;
+  try { p = await Prof.add(name); } catch (err) { return toast(err.offline ? "Adding a profile needs the computer" : err.message); }
   paintProfile(); render();
   toast(`Added ${p.face} ${p.name}. Tap Use (or the face at the top) to switch.`);
 });
@@ -173,12 +236,18 @@ function bridge(fn, ...args) {
 }
 async function api(method, path, body) {
   if (!A) throw new Error("Only works inside the app.");
-  const r = await bridge("request", method, path, body ? JSON.stringify(body) : "");
+  const paired = !!S.conn.token, web = typeof Online !== "undefined" && Online.handles(method, path);
+  const r = paired ? await bridge("request", method, path, body ? JSON.stringify(body) : "") : { status: 0 };
   if (r.route) S.route = r.route;
-  if (!r.status) { S.route = ""; const e = new Error("Can't reach your computer."); e.offline = true; throw e; }
+  if (!r.status) {
+    if (paired) S.route = "";
+    if (web) return Online.answer(method, path, body);         // the News and the catalogue: straight from the web
+    const e = new Error("Can't reach your computer."); e.offline = true; throw e;
+  }
   let data = {};
   try { data = JSON.parse(r.text || "{}"); } catch (e) {}
   if (r.status >= 400) { const e = new Error(data.error || `Error ${r.status}`); e.status = r.status; throw e; }
+  if (web) Online.remember(method, path, data);
   return data;
 }
 function toast(msg) {
@@ -234,6 +303,7 @@ function applyTheme() {
   document.documentElement.dataset.jstyle = S.jstyle;
   if (!BLAYOUTS.some((b) => b[0] === S.blayout)) S.blayout = "standard";
   document.documentElement.classList.toggle("tabs-off", !!S.tabsOff);
+  document.documentElement.classList.toggle("eink", !!S.eink);       // (e-reader screens: no motion, plain black on white)
   document.body.classList.remove("nav-open");
   placeNub();
   if (A && A.setBrowserTheme) {          // the browser screen is native: tell it the theme's colours (and the browser's layout)
@@ -380,6 +450,7 @@ function sync(force) {
         saveOps();
       }
       const d = await api("GET", `/sync/pull?since=${force ? 0 : S.since}`);
+      await Online.flush();             // (wishes, saved stories and the News's place, made while the computer was off)
       merge(d, made);
       // the browser's ad and tracker lists come from the computer too, refreshed weekly
       if (A && A.updateAdblock && now() - A.adblockAge() > 7 * 86400) bridge("updateAdblock");
@@ -394,7 +465,8 @@ function sync(force) {
     } finally {
       S.syncing = false; syncP = null;
       paintPill();
-      if (!Reader.open && $("#sheet").hidden) render();
+      const typing = document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName) && $("#view").contains(document.activeElement);
+      if (!Reader.open && $("#sheet").hidden && !typing) render();        // (never under someone typing)
     }
   })();
   return syncP;
@@ -431,6 +503,8 @@ function merge(d, made = {}) {
   if (d.pc) S.conn.pc = d.pc;
   if (d.theme) { S.theme = d.theme; applyTheme(); }
   S.since = d.now;
+  if (d.profiles) Prof.fromServer(d.profiles, d.profile);
+  if (d.bulletin && d.bulletin.week) Bulletin.fromServer(d.bulletin);
   Prof.apply();          // (what just arrived is the computer's progress: another profile's goes back on top)
   saveLibrary();
 }
@@ -528,7 +602,7 @@ function cover(it, withBar = true) {
 /* New arrivals come gift-wrapped (like the DS's presents): added in the last three weeks and not opened yet.
    The first tap unwraps it; remembered on this phone. */
 const UNWRAPPED = new Set();
-const unwrappedFile = () => (Prof.isMain() ? "unwrapped.json" : `unwrapped-${Prof.cur}.json`);     // each profile unwraps its own
+const unwrappedFile = () => (Prof.cur === "main" || Prof.cur === 1 ? "unwrapped.json" : `unwrapped-${Prof.cur}.json`);     // each profile unwraps its own
 function loadUnwrapped() { UNWRAPPED.clear(); for (const id of load(unwrappedFile(), [])) UNWRAPPED.add(id); }
 loadUnwrapped();
 // only things that arrive after wrapping began count (the computer's import dates can be refreshed by a rescan)
@@ -567,8 +641,10 @@ function row(it) {
 
 /* ---------------------------------------------------------------- screens */
 function setTab(t) {
-  if (t !== "browser" && A && A.browserHide) A.browserHide();      // (the browser's page waits, out of sight)
+  if (t !== "browser" && A && A.browserHide) { A.browserHide(); document.documentElement.classList.remove("bw-on"); }      // (the browser's page waits, out of sight)
   S.tab = t; S.limit = 60;
+  // a sheet left open (a News story, an item) would sit over the tabs and the browser: another tab closes it
+  if (!$("#sheet").hidden) { $("#sheet").hidden = true; Journal.close(); }
   $$("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
   const ic = $(`#tabs [data-tab="${t}"] b`);
   if (ic) $("#navNubIc").textContent = ic.textContent;     // the open tab's icon on the nub, so you know where you are
@@ -613,7 +689,8 @@ function browserRect() {
 function placeBrowser() {
   const o = browserPage();
   if (!o || !(o.url || o.alive)) return;
-  if (S.tab !== "browser" || !A || !A.browserShow || document.body.classList.contains("nav-open") || Reader.open) return A && A.browserHide && A.browserHide();
+  if (S.tab !== "browser" || !A || !A.browserShow || document.body.classList.contains("nav-open") || Reader.open) { document.documentElement.classList.remove("bw-on"); return A && A.browserHide && A.browserHide(); }
+  document.documentElement.classList.add("bw-on");       // (the app behind the page rests: smoother video)
   A.browserShow(JSON.stringify(browserRect()));
 }
 addEventListener("resize", () => { if (S.tab === "browser" && browserPage()) placeBrowser(); });
@@ -622,6 +699,7 @@ function renderBrowser(v) {
   const open = browserPage();
   if (open && (open.url || open.alive)) { v.innerHTML = `<div class="bw-hole" id="bwHole"></div>`; return requestAnimationFrame(placeBrowser); }
   if (A && A.browserHide) A.browserHide();
+  document.documentElement.classList.remove("bw-on");
   const h = history().reverse();
   const words = S.bq.toLowerCase().split(/\s+/).filter(Boolean);
   const list = h.filter((x) => words.every((w) => (x.url + " " + (x.title || "")).toLowerCase().includes(w)));
@@ -858,13 +936,22 @@ const Bulletin = (() => {
     const mine = items().filter((i) => i.has_file && ["book", "graphic", "tv", "movie", "article"].includes(i.kind) && !(cur && cur.id === i.id && reroll));
     const started = mine.filter((i) => W.status(i)[0] === "now");
     const long = mine.filter((i) => W.status(i)[0] === "done" && finishedAt(i) && finishedAt(i) < now() - 180 * DAY);
-    let type = "finish", pool = started;
-    if (!pool.length || (long.length && r() < 0.25)) { type = "revisit"; pool = long; }
-    if (!pool.length) return null;
+    const fresh = mine.filter((i) => !i.opened_at && W.status(i)[0] === "new");
+    // finish what you're partway through; now and then revisit an old favourite or open something never started
+    const pools = [["finish", started], ["revisit", long], ["start", fresh]].filter(([, p]) => p.length);
+    if (!pools.length) { if (reroll) toast("Nothing else to pick right now: start something and it'll turn up here."); return reroll ? cur : null; }
+    let [type, pool] = pools[0];
+    if (pools.length > 1 && r() < (reroll ? 0.5 : 0.25)) [type, pool] = pools[1 + Math.floor(r() * (pools.length - 1))];
     const it = shuffle(pool, r)[0];
     const c = { week: wk, id: it.id, type, draw: (cur && cur.week === wk ? cur.draw || 0 : 0) + (reroll ? 1 : 0), since: it.opened_at || 0 };
     store(file(), c);
+    if (S.conn.token && Prof.server) api("POST", "/sync/bulletin", c).catch(() => {});
     return c;
+  }
+  /* the computer's copy of this profile's challenge (picked there, or on another phone) */
+  function fromServer(b) {
+    const cur = load(file(), null);
+    if (!cur || b.week > cur.week || (b.week === cur.week && (b.draw || 0) >= (cur.draw || 0))) store(file(), b);
   }
   const done = (c, it) => c.type === "finish" ? W.status(it)[0] === "done" : (it.opened_at || 0) > Math.max(c.week, c.since || 0);
 
@@ -875,19 +962,19 @@ const Bulletin = (() => {
     const wrapped = shuffle(items().filter((i) => ["book", "graphic", "movie", "tv"].includes(i.kind) && i.has_file && !i.opened_at && !(it && i.id === it.id)), r).slice(0, 6);
     const when = new Date(wk * 1000).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
     const issue = Math.max(1, Math.round((wk - Date.UTC(2026, 0, 5) / 1000) / (7 * DAY)) + 1);
-    const ch = it ? { it, c, ok: done(c, it), p: pct(it), finish: c.type === "finish", ago: Math.round((now() - finishedAt(it)) / (30 * DAY)) } : null;
+    const ch = it ? { it, c, ok: done(c, it), p: pct(it), finish: c.type === "finish", start: c.type === "start", ago: Math.round((now() - finishedAt(it)) / (30 * DAY)) } : null;
     const hook = (x) => x.ok ? (x.finish ? "Done and dusted. Challenge complete." : "Revisited. Challenge complete.")
-      : x.finish ? `${x.p}% of the way. One week to cross the finish line.` : `Last read ${x.ago} months ago. Time for a second look?`;
-    const head = (x) => x.ok ? "MISSION ACCOMPLISHED" : x.finish ? "THE FINAL STRETCH" : "THE RETURN";
-    const go = (x) => x.ok ? "" : `<button class="btn primary" data-bt-go="${x.it.id}">${isVideo(x.it) ? "▶ Watch it" : x.finish ? "Finish it" : "Read it again"}</button>`;
+      : x.finish ? `${x.p}% of the way. One week to cross the finish line.` : x.start ? "Still in the wrapper. This is the week to open it." : `Last read ${x.ago} months ago. Time for a second look?`;
+    const head = (x) => x.ok ? "MISSION ACCOMPLISHED" : x.finish ? "THE FINAL STRETCH" : x.start ? "FIRST PAGE" : "THE RETURN";
+    const go = (x) => x.ok ? "" : `<button class="btn primary" data-bt-go="${x.it.id}">${isVideo(x.it) ? "▶ Watch it" : x.finish ? "Finish it" : x.start ? "Start it" : "Read it again"}</button>`;
     const by = (x) => [W.kindName(x), byline(x)].filter(Boolean).join(" · ");
     return `<div class="btm">
       <section class="btm-cover ${ch && ch.ok ? "done" : ""}">${ch ? `<div class="btm-bg">${cover(ch.it, false)}</div>` : ""}<div class="btm-sheen"></div>
         <div class="btm-title"><b>BABEL</b><span>Issue ${issue}<br>${esc(when)}</span></div>
         <div class="btm-ribbon">EXCLUSIVE</div>
-        ${ch ? `<div class="btm-burst">${ch.ok ? "DONE!" : ch.finish ? `${ch.p}%<small>there</small>` : "AGAIN?"}</div>
+        ${ch ? `<div class="btm-burst">${ch.ok ? "DONE!" : ch.finish ? `${ch.p}%<small>there</small>` : ch.start ? "NEW!" : "AGAIN?"}</div>
         <div class="btm-hero" data-item="${ch.it.id}">${cover(ch.it, false)}${ch.ok ? `<span class="bt-stamp">✓<b>Done!</b></span>` : ""}</div>
-        <div class="btm-lines"><small>${ch.finish ? "THIS WEEK'S CHALLENGE" : "THE REVISIT ISSUE"}</small><em>${head(ch)}</em><h2>${esc(W.title(ch.it))}</h2>
+        <div class="btm-lines"><small>${ch.finish ? "THIS WEEK'S CHALLENGE" : ch.start ? "THE DEBUT ISSUE" : "THE REVISIT ISSUE"}</small><em>${head(ch)}</em><h2>${esc(W.title(ch.it))}</h2>
           <p class="btm-by">${esc(by(ch.it))}</p><p class="btm-hook">${esc(hook(ch))}</p>
           ${ch.finish && !ch.ok ? `<div class="btm-meter"><i style="width:${ch.p}%"></i></div>` : ""}
           <div class="btns">${go(ch)}<button class="btn" data-bt-reroll>Pick another</button></div></div>`
@@ -944,7 +1031,7 @@ const Bulletin = (() => {
     if (w && picks) { e.stopPropagation(); return Catalogue.want(picks[Number(w.dataset.btWant)], w); }
     const fd = t.closest("[data-bt-find]"); if (fd && picks) return Catalogue.show(picks[Number(fd.dataset.btFind)]);
   }, true);
-  return { html, after, reset: () => { picks = null; } };
+  return { html, after, fromServer, reset: () => { picks = null; } };
 })();
 
 /* ---- the library's filters, exactly as on the computer: a section (Books, Articles, Music, TV & Movies), its kinds
@@ -967,7 +1054,7 @@ const LIB = {
   placeholder: { books: "Search books, authors, series…", articles: "Search articles, authors, journals, tags…", music: "Search songs, albums, artists…", video: "Search shows and films…" },
 };
 const lastName = (n) => { n = (n || "").trim(); if (n.includes(",")) return n.split(",")[0].trim(); const p = n.split(/\s+/); return p[p.length - 1] || ""; };
-const isNewsStory = (it) => it.kind === "article" && (it.source === "web" || (!it.doi && /news|times|post|guardian|bbc|npr|reuters|apnews|propublica|tribune|herald|gazette|journal\.com|magazine|patch\.com|phys\.org|sciencedaily/i.test((it.url || "") + " " + (it.journal || ""))));
+const isNewsStory = (it) => it.kind === "article" && (it.source === "web" || (it.source !== "paper" && !it.doi && /news|times|post|guardian|bbc|npr|reuters|apnews|propublica|tribune|herald|gazette|journal\.com|magazine|patch\.com|phys\.org|sciencedaily/i.test((it.url || "") + " " + (it.journal || ""))));
 const kindMatches = (it, k) => k === "manga" ? it.kind === "graphic" && it.format === "manga" : k === "comic" ? it.kind === "graphic" && it.format !== "manga"
   : k === "paper" ? it.kind === "article" && !isNewsStory(it) : k === "news" ? isNewsStory(it) : it.kind === k;
 const collName = (id) => { const c = (S.colls || []).find((x) => String(x.id) === String(id)); return c ? c.name : "Collection"; };
@@ -1040,8 +1127,23 @@ function renderLibrary(v) {
   if (!LIB.sorts.some(([k]) => k === S.sort)) S.sort = "added";
   if (S.kind !== "all" && !tabs.some(([k]) => k === S.kind)) S.kind = "all";
   const groups = libList();
-  const flat = [], labels = [];
-  for (const [name, items] of groups) for (const it of items) { flat.push(it); labels.push(name); }
+  // a series is one card in the deck (the next one to read on top); tapping it shows all its volumes
+  const flat = [], labels = [], stacks = {};
+  for (const [name, items] of groups) {
+    for (let i = 0; i < items.length;) {
+      const it = items[i], k = inSeries(it) ? seriesKey(it.series) : "";
+      let j = i + 1;
+      if (k) while (j < items.length && inSeries(items[j]) && seriesKey(items[j].series) === k) j++;
+      const run = items.slice(i, j);
+      if (run.length > 1) {
+        const top = run.find((x) => W.status(x)[0] !== "done") || run[0];
+        stacks[top.id] = { k, n: run.length, ids: run.map((x) => x.id) };
+        flat.push(top); labels.push(name);
+      } else { flat.push(it); labels.push(name); }
+      i = j;
+    }
+  }
+  Deck.stacks = stacks;      // (read by the deck's cards)
   const opt = (list, cur) => list.map(([k, l]) => `<option value="${esc(k)}" ${String(cur) === String(k) ? "selected" : ""}>${esc(l)}</option>`).join("");
   const colls = [["", "Everything"], ["wish", "★ Wishlist"], ...(S.colls || []).map((c) => [c.id, c.name])];
   v.innerHTML = `${uploadsHtml()}<button class="btn send-pc" id="sendPc">⬆ Send files to your computer</button>
@@ -1053,8 +1155,8 @@ function renderLibrary(v) {
       <label><span>Sort</span><select id="sort">${opt(LIB.sorts, S.sort)}</select></label>
       <label><span>Collection</span><select id="libColl">${opt(colls, S.coll || "")}</select></label>
     </div>
-    ${flat.length ? Deck.html(flat, labels) : `<p class="empty">Nothing here.</p>`}`;
-  if (flat.length) Deck.mount(flat.length);
+    ${area === "music" ? Jukebox.html(groups) : flat.length ? Deck.html(flat, labels) : `<p class="empty">Nothing here.</p>`}`;
+  if (flat.length && area !== "music") Deck.mount(flat.length);
 }
 function renderPhone(v, items) {
   refreshFiles();
@@ -1151,12 +1253,12 @@ function renderSettings(v) {
         <button class="btn primary" id="pairBtn">Pair</button>`}
     </div>
     <div class="panel"><h3>Profiles</h3>
-      <p class="hint">Everyone who uses this phone can have their own place in every book and film. <b>${esc(Prof.list[0].name)}</b> is kept in step with the computer; the others keep their progress on this phone only.</p>
+      <p class="hint">${Prof.server ? "The library's profiles (kept on the computer): each has its own place in every book and film, its own notes and journal, and doesn't see what the others hid. Switching needs the computer." : `Everyone who uses this phone can have their own place in every book and film. <b>${esc(Prof.list[0].name)}</b> is kept in step with the computer; the others keep their progress on this phone only.`}</p>
       <div class="prof-list">${Prof.list.map((p) => `<div class="prof-row ${p.id === Prof.cur ? "on" : ""}">
         <button class="prof-face" data-prof-face="${p.id}" aria-label="Change the picture">${p.face}</button>
-        <span class="prof-who"><input data-prof-name="${p.id}" value="${esc(p.name)}" maxlength="24" aria-label="Name"><small>${p.id === "main" ? "Synced with the computer" : "Progress on this phone only"}</small></span>
+        <span class="prof-who"><input data-prof-name="${p.id}" value="${esc(p.name)}" maxlength="24" aria-label="Name"><small>${Prof.server ? (p.id === Prof.cur ? "This phone" : "") : p.id === "main" ? "Synced with the computer" : "Progress on this phone only"}</small></span>
         ${p.id === Prof.cur ? `<span class="badge">In use</span>` : `<button class="btn sm" data-prof-use="${p.id}">Use</button>`}
-        ${p.id !== "main" ? `<button class="btn sm danger" data-prof-del="${p.id}" aria-label="Remove">✕</button>` : ""}</div>`).join("")}</div>
+        ${p.id !== "main" && !Prof.server ? `<button class="btn sm danger" data-prof-del="${p.id}" aria-label="Remove">✕</button>` : ""}</div>`).join("")}</div>
       <form class="prof-add" id="profAdd"><input id="profNew" maxlength="24" placeholder="A name" autocomplete="off"><button class="btn">＋ Add a profile</button></form></div>
     <div class="panel"><h3>Files on this phone</h3><p class="hint">${Object.keys(S.files).length} files · ${A ? fmtSize(A.freeSpace()) : "?"} free</p>
       <button class="btn" id="myFiles">See what's on the phone</button></div>
@@ -1166,6 +1268,7 @@ function renderSettings(v) {
       <label class="check"><input type="checkbox" id="newsAlerts" ${A && A.newsAlerts && A.newsAlerts() ? "checked" : ""}> Notify me when a new event turns up in the News “Events” section</label>
       <p class="hint">${WEB ? "Works when this app is on your Home Screen (in Safari: Share → Add to Home Screen, then open it from there). The computer looks every few hours and sends the notification; tap it to share or open the event." : "The computer looks every few hours; the phone checks in about once an hour and needs to reach the computer (home Wi-Fi, or “Reach this library from anywhere”). Each notification has Share and Open."}</p></div>
     <div class="panel"><h3>Look</h3>
+      <label class="check"><input type="checkbox" id="einkOn" ${S.eink ? "checked" : ""}> E-reader mode <small class="hint">(for e-ink screens: no animations or shadows, plain black on white)</small></label>
       <div class="field"><label for="themeSel">Theme</label><select id="themeSel"><option value="auto">Same as the computer</option>${Object.entries(window.THEMES || {}).map(([k, t]) => `<option value="${k}">${esc(t.name)}</option>`).join("")}</select></div>
       <h4 class="pick-h">Getting around <small>how you switch between Home, Library, Catalogue…</small></h4>
       <div class="pick-grid">${NAVS.map(([k, n, d, zany]) => `<button class="pick ${S.nav === k ? "on" : ""} ${zany ? "zany" : ""}" data-nav-pick="${k}"><i class="pk pk-${k}"></i><b>${n}</b><small>${d}</small></button>`).join("")}</div>
@@ -1279,6 +1382,12 @@ function kinHtml(it) {
   if (!list.length) return "";
   return `<h3 style="margin-top:16px">${esc(head)}</h3><div class="shelf">${list.slice(0, 16).map((x) => card(x, x.kind === "tv" ? `S${x.season || 1} · E${x.episode ?? "?"}` : [x.series_index ? "#" + +x.series_index : "", x.year].filter(Boolean).join(" · "))).join("")}</div>`;
 }
+/* which shelf an item is on, and what moving it to another one changes ("paper" and "web" sources settle whether an
+   article is a scientific paper or a news story, whatever its address suggests) */
+const SHELVES = [["book", "Book"], ["manga", "Manga"], ["comic", "Comic"], ["paper", "Scientific paper"], ["news", "News story"], ["movie", "Film"], ["tv", "TV episode"], ["music", "Music"]];
+const SHELF_FIELDS = { book: { kind: "book" }, manga: { kind: "graphic", format: "manga" }, comic: { kind: "graphic", format: "comic" },
+  paper: { kind: "article", source: "paper" }, news: { kind: "article", source: "web" }, movie: { kind: "movie" }, tv: { kind: "tv" }, music: { kind: "music" } };
+const shelfOf = (d) => d.kind === "graphic" ? (d.format === "manga" ? "manga" : "comic") : d.kind === "article" ? (isNewsStory(d) ? "news" : "paper") : d.kind;
 /* the rest of the details, as on the computer: they come from the computer (and edits go straight back to it) */
 async function fullDetails(id) {
   const box = $("#itFull");
@@ -1294,6 +1403,8 @@ async function fullDetails(id) {
     ${!media && cites ? `<h3 style="margin-top:16px">Citations</h3><div class="cites">${cites}</div>` : ""}
     <h3 style="margin-top:16px">Details</h3>
     <form class="it-form" id="itForm">
+      ${Prof.server && (Prof.list.length > 1 || d.private_to) ? `<label class="check full"><input type="checkbox" name="private" ${d.private_to ? "checked" : ""}> 🔒 Only me <small class="hint">(hidden from the other profiles)</small></label>` : ""}
+      <label class="field full"><span>Shelf</span><select name="shelf">${SHELVES.map(([k, n]) => `<option value="${k}" ${shelfOf(d) === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       ${F("title", "Title", d.title, "text", true)}
       <label class="field full"><span>${vid ? "Directors / creators" : d.kind === "music" ? "Artists" : "Authors"} (one per line)</span><textarea name="authors" rows="2">${esc((d.authors || []).join("\n"))}</textarea></label>
       ${F("year", "Year", d.year)}
@@ -1319,6 +1430,22 @@ async function fullDetails(id) {
     ${d.file_location ? `<p class="hint">On the computer: ${esc(d.file_location)}</p>` : ""}`;
   $("#itForm").addEventListener("change", async (e) => {
     const el = e.target;
+    if (el.name === "private") {
+      try {
+        await api("POST", `/sync/item/${id}/edit`, { private: el.checked });
+        if (S.items[id]) { S.items[id].private_to = el.checked ? Prof.cur : null; saveLibrary(true); }
+        return toast(el.checked ? "Hidden from the other profiles" : "Everyone can see it again");
+      } catch (err) { el.checked = !el.checked; return toast(err.message); }
+    }
+    if (el.name === "shelf") {           // another shelf: Books, Manga, Comics, papers, news stories, films, TV, music
+      const f = SHELF_FIELDS[el.value];
+      try {
+        await api("POST", `/sync/item/${id}/edit`, f);
+        if (S.items[id]) { Object.assign(S.items[id], f); saveLibrary(true); }
+        toast(`Moved to ${SHELVES.find((x) => x[0] === el.value)[1]}`);
+        return fullDetails(id);          // (the fields that suit the new shelf)
+      } catch (err) { return toast(err.message); }
+    }
     let v = el.value;
     if (el.name === "authors") v = v.split(/\n|;/).map((x) => x.trim()).filter(Boolean);
     else if (el.name === "tags") v = v.split(",").map((x) => x.trim()).filter(Boolean);
@@ -1360,12 +1487,12 @@ const Deck = (() => {
   let n = 0, raf = 0, labels = [];
   const kindOf = (it) => (it.kind === "graphic" && it.format === "manga" ? ["MG", "Manga", "漫画"] : KIND[it.kind] || ["IT", "Item", "資料"]);
   const card = (it, i) => {
-    const k = kindOf(it);
-    return `<button class="pc" data-item="${it.id}" data-i="${i}" hidden style="--c:${colorFor(it)}">
+    const k = kindOf(it), st = self.stacks[it.id];
+    return `<button class="pc ${st ? "stack" : ""}" data-item="${it.id}" ${st ? `data-stack="${it.id}"` : ""} data-i="${i}" hidden style="--c:${colorFor(it)}">
       <i class="pc-eye"></i><small class="pc-code">${k[0]}-${String(it.id).padStart(4, "0")}</small>
       <span class="pc-art">${cover(it)}</span>
-      <b class="pc-t">${esc(it.kind === "tv" ? it.series || it.title : it.title || "Untitled")}</b>
-      <small class="pc-s">${esc(byline(it) || k[2])}</small>
+      <b class="pc-t">${esc(st ? it.series : it.kind === "tv" ? it.series || it.title : it.title || "Untitled")}</b>
+      <small class="pc-s">${esc(st ? `📚 ${st.n} in the series · next: ${it.series_index ? "#" + +it.series_index + " " : ""}${it.title || ""}` : byline(it) || k[2])}</small>
       <span class="pc-foot"><em>${esc(k[1])} · ${esc(k[2])}</em><em>${it.year ? esc(it.year) : ""}</em></span></button>`;
   };
   // (labels: the group each card is in, shown on the binder with that group's count, like the computer's group headings)
@@ -1438,10 +1565,26 @@ const Deck = (() => {
     d.scrollTop = ((S.deckAt || {})[key()] || 0) * STEP;
     paint();
   }
-  // only the card in front opens; the rest are still being flipped past
-  document.addEventListener("click", (e) => { const c = e.target.closest?.(".pc"); if (c && !c.classList.contains("front")) { e.stopPropagation(); e.preventDefault(); } }, true);
+  // only the card in front opens; the rest are still being flipped past. A series' card opens to its volumes
+  document.addEventListener("click", (e) => {
+    const c = e.target.closest?.(".pc");
+    if (!c) return;
+    if (!c.classList.contains("front")) { e.stopPropagation(); e.preventDefault(); return; }
+    const st = c.dataset.stack && self.stacks[c.dataset.stack];
+    if (st) { e.stopPropagation(); e.preventDefault(); openSeries(st); }
+  }, true);
+  function openSeries(st) {
+    const list = st.ids.map((id) => S.items[id]).filter(Boolean), first = list[0];
+    const sh = $("#sheet");
+    sh.innerHTML = `<div class="sheet-bar"><button class="back" data-close>‹</button><h2>${esc(first.series)}</h2></div>
+      <div class="it-body" style="padding-top:14px"><p class="hint">${list.length} in the series · ${list.filter((x) => W.status(x)[0] === "done").length} finished</p>
+        <div class="shelf series-shelf">${list.map((x) => `<button class="card ${W.status(x)[0] === "done" ? "seen" : ""}" data-item="${x.id}">${cover(x)}<b>${esc(x.title || "Untitled")}</b><small>${esc([x.series_index ? "#" + +x.series_index : "", x.year, W.status(x)[0] === "done" ? "✓ read" : pct(x) > 1 ? pct(x) + "%" : ""].filter(Boolean).join(" · "))}</small></button>`).join("")}</div></div>`;
+    sh.hidden = false;
+    sh.scrollTop = 0;
+  }
   addEventListener("resize", queue);
-  return { html, mount, STEP };
+  const self = { html, mount, STEP, stacks: {} };
+  return self;
 })();
 function closeSheet() { $("#sheet").hidden = true; Journal.close(); render(); }
 
@@ -1494,15 +1637,29 @@ document.addEventListener("click", (e) => {
   if (t.closest("#fullSync")) return sync(true).then(() => { toast("Library fetched again"); render(); });
   if (t.closest("#unpair")) return unpair();
 });
+/* search boxes that redraw the page as you type: never while the keyboard is partway through a word (redrawing
+   swaps the box for a new one, and the keyboard loses the word); the redraw waits until the word is done */
+let composing = false;
+document.addEventListener("compositionstart", () => { composing = true; });
+document.addEventListener("compositionend", (e) => { composing = false; if (e.target.id === "q" || e.target.id === "bq") e.target.dispatchEvent(new Event("input", { bubbles: true })); });
+function redrawKeeping(id) {
+  if (composing) return;
+  const el = $("#" + id);
+  const pos = el ? el.selectionStart : null;
+  render();
+  const q = $("#" + id);
+  if (q) { q.focus(); if (pos != null) q.setSelectionRange(pos, pos); }
+}
 document.addEventListener("input", (e) => {
-  if (e.target.id === "bq") { S.bq = e.target.value; clearTimeout(render.b); render.b = setTimeout(() => { const pos = e.target.selectionStart; render(); const q = $("#bq"); q.focus(); q.setSelectionRange(pos, pos); }, 250); }
-  if (e.target.id === "q") { S.q = e.target.value; clearTimeout(render.t); render.t = setTimeout(() => { const pos = e.target.selectionStart; render(); const q = $("#q"); q.focus(); q.setSelectionRange(pos, pos); }, 250); }
+  if (e.target.id === "bq") { S.bq = e.target.value; clearTimeout(render.b); render.b = setTimeout(() => redrawKeeping("bq"), 250); }
+  if (e.target.id === "q") { S.q = e.target.value; clearTimeout(render.t); render.t = setTimeout(() => redrawKeeping("q"), 250); }
 });
 document.addEventListener("change", (e) => {
   if (e.target.id === "sort") { S.sort = e.target.value; saveState(); render(); }
   if (e.target.id === "libGroup") { S.groupBy = e.target.value; (S.groupByArea ||= {})[S.area] = S.groupBy; saveState(); render(); }
   if (e.target.id === "libColl") { S.coll = e.target.value; saveState(); render(); }
   if (e.target.id === "autoGet") { S.autoGet = e.target.checked; saveState(); }
+  if (e.target.id === "einkOn") { S.eink = e.target.checked; saveState(); applyTheme(); }
   if (e.target.id === "newsAlerts") {
     const on = e.target.checked;
     // (the phone also switches the computer's watcher on, since that's what finds them)

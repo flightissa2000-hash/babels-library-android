@@ -479,7 +479,43 @@ public class MainActivity extends Activity {
             }
             if (r.status == 404) break;
         }
+        // the computer is off: straight from the picture's own address (or Open Library, by ISBN)
+        Uri q = Uri.parse("x:/?" + query);
+        String u = q.getQueryParameter("u"), isbn = q.getQueryParameter("isbn");
+        if ((u == null || !u.startsWith("https://")) && isbn != null && isbn.matches("[0-9Xx]{10,13}"))
+            u = "https://covers.openlibrary.org/b/isbn/" + isbn + "-M.jpg?default=false";
+        if (u != null && u.startsWith("https://")) {
+            byte[] img = webBytes(u, 20000);
+            if (img != null && img.length > 200) {
+                Map<String, String> h = new HashMap<>();
+                h.put("Cache-Control", "max-age=604800");
+                return new WebResourceResponse("image/jpeg", null, 200, "OK", h, new ByteArrayInputStream(img));
+            }
+        }
         return notFound();
+    }
+
+    private static final String WEB_UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Mobile Safari/537.36";
+
+    /** A page or file from the web itself (not the computer): for the News and the catalogue when the computer is off. */
+    static byte[] webBytes(String url, int readMs) {
+        try {
+            java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+            c.setConnectTimeout(8000);
+            c.setReadTimeout(readMs);
+            c.setInstanceFollowRedirects(true);
+            c.setRequestProperty("User-Agent", WEB_UA);
+            if (c.getResponseCode() != 200) return null;
+            try (java.io.InputStream in = c.getInputStream()) {
+                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[16384];
+                int n;
+                while ((n = in.read(buf)) > 0) { out.write(buf, 0, n); if (out.size() > 8 << 20) return null; }
+                return out.toByteArray();
+            }
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** /net/<path>: a GET from the computer with the pairing token (the reader's subtitles and audiobook chapters
@@ -756,6 +792,50 @@ public class MainActivity extends Activity {
             pool.execute(() -> {
                 Net.Res r = Net.call(method, path, body == null || body.isEmpty() ? null : body);
                 done(id, r.status, r.status > 0 ? r.text() : r.error, Net.via);
+            });
+        }
+
+        /** The web itself (https only), for the News and the catalogue when the computer is off: no CORS here. */
+        @JavascriptInterface
+        public void webget(final String id, final String method, final String url, final String body, final String headers) {
+            pool.execute(() -> {
+                if (url == null || !url.startsWith("https://")) { done(id, 0, "bad address", ""); return; }
+                java.net.HttpURLConnection c = null;
+                try {
+                    c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+                    c.setConnectTimeout(8000);
+                    c.setReadTimeout(25000);
+                    c.setInstanceFollowRedirects(true);
+                    c.setRequestProperty("User-Agent", WEB_UA);
+                    c.setRequestProperty("Accept-Language", "en-US,en;q=0.9");
+                    if (headers != null && !headers.isEmpty()) {
+                        JSONObject h = new JSONObject(headers);
+                        for (java.util.Iterator<String> k = h.keys(); k.hasNext(); ) { String n = k.next(); c.setRequestProperty(n, h.getString(n)); }
+                    }
+                    if ("POST".equals(method)) {
+                        c.setRequestMethod("POST");
+                        c.setDoOutput(true);
+                        byte[] b = (body == null ? "" : body).getBytes("UTF-8");
+                        c.getOutputStream().write(b);
+                    }
+                    int st = c.getResponseCode();
+                    java.io.InputStream in = st >= 400 ? c.getErrorStream() : c.getInputStream();
+                    java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                    if (in != null) try (java.io.InputStream i = in) {
+                        byte[] buf = new byte[16384];
+                        int n;
+                        while ((n = i.read(buf)) > 0) { out.write(buf, 0, n); if (out.size() > 6 << 20) break; }
+                    }
+                    String cs = "UTF-8", ct = c.getContentType();
+                    if (ct != null && ct.toLowerCase().contains("charset=")) cs = ct.substring(ct.toLowerCase().indexOf("charset=") + 8).replaceAll("[\"; ].*$", "");
+                    String text;
+                    try { text = out.toString(cs); } catch (Exception e) { text = out.toString("UTF-8"); }
+                    done(id, st, text, c.getURL().toString());
+                } catch (Exception e) {
+                    done(id, 0, String.valueOf(e.getMessage()), "");
+                } finally {
+                    if (c != null) c.disconnect();
+                }
             });
         }
 

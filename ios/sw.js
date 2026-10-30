@@ -72,6 +72,15 @@ async function viaComputer(req, cacheName, path) {
   return res;
 }
 
+/* a catalogue cover while the computer is off: straight from the picture's address (or Open Library, by ISBN).
+   The answer is opaque (no CORS), which an <img> shows all the same. */
+async function direct(url) {
+  const q = url.searchParams, isbn = q.get("isbn") || "";
+  let u = /^https:\/\//.test(q.get("u") || "") ? q.get("u") : /^[0-9Xx]{10,13}$/.test(isbn) ? `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg?default=false` : "";
+  if (!u) return notFound();
+  try { return await fetch(u, { mode: "no-cors" }); } catch (err) { return notFound(); }
+}
+
 /* /net/<path>: a GET from the computer with the pairing token (subtitles and audiobook chapters; Range passes through) */
 async function net(req, path) {
   await conn();
@@ -95,7 +104,7 @@ self.addEventListener("fetch", (e) => {
     if (!/^\d{1,9}$/.test(id)) return e.respondWith(notFound());
     return e.respondWith(viaComputer(e.request, "covers", "/sync/cover/" + id));
   }
-  if (p === "/catcover") return e.respondWith(viaComputer(e.request, "catcovers", "/sync/cat/cover" + url.search));
+  if (p === "/catcover") return e.respondWith(viaComputer(e.request, "catcovers", "/sync/cat/cover" + url.search).then((r) => r.ok ? r : direct(url)));
   if (p.startsWith("/net/sync/")) return e.respondWith(net(e.request, p.slice(4) + url.search));
   // the app itself: from the phone first (it works offline), refreshed when a new version is published
   e.respondWith(caches.open(SHELL).then(async (c) => (await c.match(e.request, { ignoreSearch: true })) || fetch(e.request)));
