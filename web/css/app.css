@@ -932,7 +932,7 @@ html[data-nav=folders] .hw-swap{--tabs-w:46px}
 [data-theme=wordtown] .btm-cover{background:linear-gradient(#bfe7ff 0 80%,#8fd17a 80%);border-bottom:4px solid #22304a;color:#22304a}
 [data-theme=wordtown] .btm-bg,[data-theme=wordtown] .btm-sheen{display:none}
 [data-theme=wordtown] .btm-cover::before{background:radial-gradient(circle at 84% 30%,#fff 0 30px,transparent 31px),radial-gradient(circle at 90% 26%,#fff 0 24px,transparent 25px),radial-gradient(circle at 10% 92%,#ffc93c 0 24px,transparent 25px)}
-[data-theme=wordtown] .btm-title b{color:#ff6b4a;-webkit-text-stroke:3px #22304a;text-shadow:5px 5px 0 #22304a;font-family:"Fredoka","Anton",sans-serif;font-weight:700;font-size:4.4rem}
+[data-theme=wordtown] .btm-title b{color:#ff6b4a;-webkit-text-stroke:6px #22304a;paint-order:stroke fill;text-shadow:5px 5px 0 #22304a;font-family:"Fredoka","Anton",sans-serif;font-weight:700;font-size:4.4rem}
 [data-theme=wordtown] .btm-ribbon{background:#ff8fc0;color:#22304a;border:3px solid #22304a;box-shadow:none}
 [data-theme=wordtown] .btm-hero .cov{border:3px solid #22304a;box-shadow:6px 6px 0 #22304a}
 [data-theme=wordtown] .btm-lines small{background:#4aa8ff;border:2px solid #22304a;color:#fff}
