@@ -166,10 +166,28 @@ const Jukebox = (() => {
   }
   function changed() {
     keep();
+    note();
     const w = $("#jxWindow"); if (w) w.innerHTML = windowHtml();
     paintBar();
     if (!$("#sheet").hidden && $("#sheet").dataset.jxNow) openNow();
   }
+  /* the phone's media notification: ⏮ ⏯ ⏭ ✕ */
+  function note() {
+    const t = cur();
+    if (!t) return Media.hide(self);
+    Media.show(self, { title: t.title || "", artist: [t.album_artist || (t.authors || [])[0], t.album].filter(Boolean).join(" · "), kind: "music", playing: !audio.paused });
+  }
+  const self = {
+    command(cmd) {
+      if (cmd === "toggle") toggle();
+      else if (cmd === "play") { if (audio.paused) toggle(); }
+      else if (cmd === "pause") { if (!audio.paused) audio.pause(); }
+      else if (cmd === "next" || cmd === "fwd") next();
+      else if (cmd === "prev" || cmd === "back") prev();
+      else if (cmd === "stop") stop();
+    },
+  };
+  function stop() { J.tracks = []; J.order = []; J.pos = 0; audio.pause(); audio.removeAttribute("src"); changed(); }
   function paintBar() {
     let b = $("#jxBar");
     const t = cur(), was = !!b;
@@ -235,7 +253,7 @@ const Jukebox = (() => {
     else if (k === "shuffle") setShuffle(!J.shuffle);
     else if (k === "repeat") { J.repeat = { off: "all", all: "one", one: "off" }[J.repeat]; toast({ off: "Repeat off", all: "Repeat all", one: "Repeat this song" }[J.repeat]); changed(); }
     else if (k === "clear") { J.order = J.order.slice(0, J.pos + 1); changed(); }
-    else if (k === "stop") { J.tracks = []; J.order = []; J.pos = 0; audio.pause(); audio.removeAttribute("src"); changed(); if ($("#sheet").dataset.jxNow) closeSheet(); toast("Music stopped"); }
+    else if (k === "stop") { stop(); if ($("#sheet").dataset.jxNow) closeSheet(); toast("Music stopped"); }
   });
   document.addEventListener("input", (e) => { if (e.target.id === "jxSeek") { audio.currentTime = Number(e.target.value); $("#jxAt").textContent = fmt(audio.currentTime); } });
   // the sheet closing: it's no longer the jukebox window or an album
@@ -249,5 +267,6 @@ const Jukebox = (() => {
     const list = a ? a.tracks : [it];
     playList(list, Math.max(0, list.indexOf(it)), false);
   }
-  return { html, playItem, openNow };
+  function pauseForVideo() { if (!audio.paused) audio.pause(); }
+  return { html, playItem, openNow, note, pauseForVideo };
 })();

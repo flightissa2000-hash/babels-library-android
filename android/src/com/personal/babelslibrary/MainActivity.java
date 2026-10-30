@@ -71,6 +71,14 @@ public class MainActivity extends Activity {
     }
 
     private WebView web;
+    private static java.lang.ref.WeakReference<MainActivity> live = new java.lang.ref.WeakReference<>(null);
+    private volatile boolean appPlaying = false;
+
+    /** A button on the playing notification (or the lock screen, a headset…): to the app's player. */
+    static void mediaCommand(String cmd) {
+        MainActivity m = live.get();
+        if (m != null) m.js("window.Native && Native.media && Native.media(" + JSONObject.quote(cmd) + ")");
+    }
     private Dictation dictation;                 // speech to text for phone notes
     private final ExecutorService pool = Executors.newFixedThreadPool(4);
     private final Map<String, List<String>> comicPages = new HashMap<>();
@@ -95,7 +103,13 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        web = new WebView(this);
+        live = new java.lang.ref.WeakReference<>(this);
+        // while the app's own player plays (a song, a video), the page is told it's still on screen when you leave the
+        // app or lock the phone, so the video doesn't pause itself
+        web = new WebView(this) {
+            @Override protected void onWindowVisibilityChanged(int v) { super.onWindowVisibilityChanged(appPlaying ? View.VISIBLE : v); }
+            @Override protected void onVisibilityChanged(View changed, int v) { super.onVisibilityChanged(changed, appPlaying ? View.VISIBLE : v); }
+        };
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
@@ -703,6 +717,27 @@ public class MainActivity extends Activity {
             dictation.permissionResult(results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED);
     }
 
+    /* page-turn buttons (Settings → Page-turn buttons): while a book is open the app is told which keys turn pages
+       (volume, an e-reader's page buttons…) and they stop doing their usual job; "learn" reports the next key pressed */
+    private volatile java.util.Set<Integer> pageKeys = new java.util.HashSet<>();
+    private volatile boolean learnKey = false;
+
+    @Override
+    public boolean dispatchKeyEvent(android.view.KeyEvent ev) {
+        int k = ev.getKeyCode();
+        boolean system = k == android.view.KeyEvent.KEYCODE_BACK || k == android.view.KeyEvent.KEYCODE_HOME || k == android.view.KeyEvent.KEYCODE_POWER
+                || k == android.view.KeyEvent.KEYCODE_APP_SWITCH || k == android.view.KeyEvent.KEYCODE_MENU;
+        boolean browsing = browser != null && browser.view().getVisibility() == View.VISIBLE;
+        if (!system && !browsing && (learnKey || pageKeys.contains(k))) {
+            if (ev.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+                if (learnKey) { learnKey = false; js("window.Native && Native.keyLearned && Native.keyLearned('a:" + k + "'," + JSONObject.quote(android.view.KeyEvent.keyCodeToString(k)) + ")"); }
+                else js("window.Native && Native.pageKey && Native.pageKey('a:" + k + "')");
+            }
+            return true;
+        }
+        return super.dispatchKeyEvent(ev);
+    }
+
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
@@ -1045,6 +1080,34 @@ public class MainActivity extends Activity {
             } catch (IOException e) {
                 return "";
             }
+        }
+
+        /** What the app's player is playing ({title, artist, kind, playing}), or "" when it stops: the media notification. */
+        @JavascriptInterface
+        public void mediaState(String json) {
+            runOnUiThread(() -> {
+                if (json == null || json.isEmpty()) { appPlaying = false; PlaybackService.end(MainActivity.this, "app"); return; }
+                try { appPlaying = new JSONObject(json).optBoolean("playing"); } catch (Exception ignored) { }
+                PlaybackService.app(MainActivity.this, json);
+                // (the notification needs permission on Android 13+: asked once)
+                if (appPlaying && android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                        && !getSharedPreferences("browser", MODE_PRIVATE).getBoolean("askedNotify", false)) {
+                    getSharedPreferences("browser", MODE_PRIVATE).edit().putBoolean("askedNotify", true).apply();
+                    requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 11);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void pageKeys(String json) {
+            try {
+                JSONObject o = new JSONObject(json);
+                java.util.Set<Integer> s = new java.util.HashSet<>();
+                org.json.JSONArray a = o.optJSONArray("codes");
+                if (a != null) for (int i = 0; i < a.length(); i++) s.add(a.getInt(i));
+                pageKeys = s;
+                learnKey = o.optBoolean("learn");
+            } catch (Exception ignored) { }
         }
 
         @JavascriptInterface

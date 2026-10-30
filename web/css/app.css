@@ -1212,3 +1212,12 @@ html.bw-on *,html.bw-on *::before,html.bw-on *::after{animation-play-state:pause
 .jx-barfill{position:absolute;left:0;bottom:0;height:3px;background:#ffd23f;width:0}
 body.has-jx #view{padding-bottom:84px}
 html.eink .jx-rec.spin,html.eink .jx-bigrec.spin,html.eink .jx-neon{animation:none}
+
+/* Settings → page-turn buttons */
+.pk-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:8px 0}
+.pk-row>b{flex:0 0 100%;font-size:.85rem}
+.pk-row>span{display:flex;flex-wrap:wrap;gap:4px;flex:1}
+.pk-chip{display:inline-flex;align-items:center;gap:2px;padding:2px 4px 2px 9px;border-radius:999px;background:var(--surface);border:1px solid var(--line);font-size:.8rem}
+.pk-chip button{border:0;background:none;color:var(--ink-soft);padding:2px 5px;font-size:.75rem}
+.linkish{border:0;background:none;color:var(--accent);text-decoration:underline;padding:0;font:inherit}
+html.tabs-off .hw-swap{--tabs-w:0px!important}

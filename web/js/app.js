@@ -227,6 +227,7 @@ window.Native = {
   onResume() { refreshFiles(); sync(); },
   onPause() { if (Reader.open) Reader.saveNow(); saveLibrary(); },
   onBack() {
+    if (window.PageKeys && PageKeys.cancel()) return true;
     if (Reader.open) return Reader.back();
     if (!$("#sheet").hidden) { closeSheet(); return true; }
     if (S.tab !== "home") { setTab("home"); return true; }
@@ -317,6 +318,28 @@ function applyTheme() {
 /* the orange tab (tabs hidden): see-through, and dragged up or down out of the way; its height is kept (S.nubY, a
    fraction of the screen) and the browser's copy of it sits at the same height */
 function placeNub() { document.documentElement.style.setProperty("--nub-y", ((S.nubY || 0.5) * 100).toFixed(2) + "%"); }
+/* what the app itself is playing (the jukebox, a video): the phone's media notification, its status bar chip and the
+   lock screen show it, with play/pause and skip; their buttons come back here (Native.media) to whoever is playing */
+const Media = {
+  owner: null, last: "",
+  show(owner, st) {
+    this.owner = owner;
+    const j = JSON.stringify(st);
+    if (j === this.last) return;
+    this.last = j;
+    if (A && A.mediaState) A.mediaState(j);
+  },
+  hide(owner) {
+    if (this.owner !== owner) return;
+    this.owner = null; this.last = "";
+    if (A && A.mediaState) A.mediaState("");
+    if (window.Jukebox && owner !== Jukebox) Jukebox.note();       // (a video closed: the jukebox's song, if any, is shown again)
+  },
+};
+window.Native.media = (cmd) => {
+  if (cmd === "ended") { Media.last = ""; return; }          // (the notification went away by itself)
+  if (Media.owner) Media.owner.command(cmd);
+};
 window.Native.nubMoved = (f) => { S.nubY = Math.max(0.06, Math.min(0.94, Number(f) || 0.5)); placeNub(); saveState(); };
 (() => {
   let y0 = null, f0 = 0, moved = false;
@@ -1280,6 +1303,7 @@ function renderSettings(v) {
     <div class="panel"><h3>News</h3>
       <label class="check"><input type="checkbox" id="newsAlerts" ${A && A.newsAlerts && A.newsAlerts() ? "checked" : ""}> Notify me when a new event turns up in the News “Events” section</label>
       <p class="hint">${WEB ? "Works when this app is on your Home Screen (in Safari: Share → Add to Home Screen, then open it from there). The computer looks every few hours and sends the notification; tap it to share or open the event." : "The computer looks every few hours; the phone checks in about once an hour and needs to reach the computer (home Wi-Fi, or “Reach this library from anywhere”). Each notification has Share and Open."}</p></div>
+    ${window.PageKeys ? PageKeys.panel() : ""}
     <div class="panel"><h3>Look</h3>
       <label class="check"><input type="checkbox" id="einkOn" ${S.eink ? "checked" : ""}> E-reader mode <small class="hint">(for e-ink screens: no animations or shadows, plain black on white)</small></label>
       <div class="field"><label for="themeSel">Theme</label><select id="themeSel"><option value="auto">Same as the computer</option>${Object.entries(window.THEMES || {}).map(([k, t]) => `<option value="${k}">${esc(t.name)}</option>`).join("")}</select></div>

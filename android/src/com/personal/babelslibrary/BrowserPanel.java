@@ -747,17 +747,29 @@ public class BrowserPanel extends android.content.ContextWrapper {
     private static java.lang.ref.WeakReference<BrowserPanel> live = new java.lang.ref.WeakReference<>(null);
     static BrowserPanel current() { return live.get(); }
 
-    /** Stop (from the playing notification): pause whatever is playing, in both halves. */
-    void pauseMedia() {
+    /** The playing notification's buttons: play/pause, 10 seconds back or on, or stop (pause, and the notification goes). */
+    void mediaCommand(String cmd) {
+        final String code;
+        switch (cmd == null ? "" : cmd) {
+            case "pause": case "stop": code = "document.querySelectorAll('video,audio').forEach(m=>m.pause())"; break;
+            case "play": case "toggle":
+                code = "(()=>{const a=[...document.querySelectorAll('video,audio')];const p=a.filter(m=>!m.paused);if(p.length&&'" + cmd + "'==='toggle'){p.forEach(m=>m.pause());return}"
+                        + "const m=a.find(m=>m.currentTime>0&&!m.ended)||a[0];if(m)m.play()})()"; break;
+            case "fwd": case "next": case "back": case "prev":
+                code = "(()=>{const a=[...document.querySelectorAll('video,audio')];const m=a.find(m=>!m.paused)||a.find(m=>m.currentTime>0)||a[0];if(m)m.currentTime=Math.max(0,m.currentTime"
+                        + (cmd.equals("fwd") || cmd.equals("next") ? "+" : "-") + "10)})()"; break;
+            default: return;
+        }
         runOnUiThread(() -> {
-            for (WebView w : new WebView[]{webA, webB})
-                if (w != null) w.evaluateJavascript("document.querySelectorAll('video,audio').forEach(m=>m.pause())", null);
+            for (WebView w : new WebView[]{webA, webB}) if (w != null) w.evaluateJavascript(code, null);
+            if ("stop".equals(cmd)) { keeping = false; wasPlaying = false; }
+            ui.postDelayed(watchMedia, 400);         // (the notification shows the change straight away)
         });
     }
 
     /* While something plays, the playing service runs (Android only lets it start while the browser is on screen, so
        it starts with the video rather than when you leave); when nothing plays any more, it ends. */
-    private boolean resumed = false, keeping = false;
+    private boolean resumed = false, keeping = false, wasPlaying = false;
     private final Runnable watchMedia = new Runnable() {
         @Override public void run() {
             final boolean[] any = {false};
@@ -771,17 +783,19 @@ public class BrowserPanel extends android.content.ContextWrapper {
                     // the screen stays on while something plays (like a video app; the power button still turns it off)
                     if (any[0]) getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                     else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    // playing, or paused after playing: the media notification (play/pause, ±10 s, ✕), like a browser's
+                    if (any[0] && keeping && !wasPlaying) { PlaybackService.browser(BrowserPanel.this, w.getTitle(), true); wasPlaying = true; }
                     if (any[0] && !keeping && resumed) {
-                        try { PlaybackService.start(BrowserPanel.this, w.getTitle()); keeping = true; } catch (Exception ignored) { }
+                        try { PlaybackService.browser(BrowserPanel.this, w.getTitle(), true); keeping = true; wasPlaying = true; } catch (Exception ignored) { }
                         // (its notification, with Stop, needs permission to show on Android 13+: asked once)
                         if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
                                 && !getSharedPreferences("browser", MODE_PRIVATE).getBoolean("askedNotify", false)) {
                             getSharedPreferences("browser", MODE_PRIVATE).edit().putBoolean("askedNotify", true).apply();
                             requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 11);
                         }
-                    } else if (!any[0] && keeping) {
-                        PlaybackService.stop(BrowserPanel.this);
-                        keeping = false;
+                    } else if (!any[0] && keeping && wasPlaying) {
+                        PlaybackService.browser(BrowserPanel.this, w.getTitle(), false);
+                        wasPlaying = false;
                     }
                 });
             }

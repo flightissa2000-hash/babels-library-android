@@ -64,6 +64,7 @@ Object.assign(window.Reader, (() => {
     R = { it, name, url, ext, kind, active: null, pinMode: false };
     window.Reader.open = true;
     if (A) A.keepAwake(true);
+    if (window.PageKeys) PageKeys.capture(["pdf", "epub", "comic"].includes(kind));      // (the page-turn buttons: books only)
     change(it.id, { opened_at: now() });
     try {
       if (kind === "pdf") await pdf();
@@ -91,6 +92,7 @@ Object.assign(window.Reader, (() => {
     R = null;
     window.Reader.open = false;
     if (A) A.keepAwake(false);
+    if (window.PageKeys) PageKeys.capture(false);
     const el = $("#reader");
     el.hidden = true; el.innerHTML = "";
     if (switching === true) return;
@@ -933,7 +935,7 @@ Object.assign(window.Reader, (() => {
     $("#reader").classList.add("calm");
     const skip = (s) => `<button class="v-skip" data-vskip="${s}">${s < 0 ? `↺ ${-s}` : `${s} ↻`}</button>`;
     st.innerHTML = `<div class="v-box"><video class="r-media" controls playsinline autoplay preload="metadata"></video><span class="v-flash" id="vFlash"></span></div>
-      <div class="v-skips">${[-30, -15, -5].map(skip).join("")}<span class="v-gap"></span>${[5, 15, 30].map(skip).join("")}</div>`;
+      <div class="v-skips">${[-30, -10, -5].map(skip).join("")}<span class="v-gap"></span>${[5, 10, 30].map(skip).join("")}</div>`;
     const v = st.querySelector("video");
     R.video = v;
     // skipping: the buttons, or a double tap on the left or right half of the picture (10 s)
@@ -946,12 +948,34 @@ Object.assign(window.Reader, (() => {
       clearTimeout(jump.t); jump.t = setTimeout(() => (f.className = "v-flash"), 600);
     };
     st.querySelector(".v-skips").onclick = (e) => { const b = e.target.closest("[data-vskip]"); if (b) jump(Number(b.dataset.vskip)); };
-    let lastTap = 0;
+    let lastTap = 0, tapT = null;
     v.addEventListener("click", (e) => {
       const t = Date.now();
-      if (t - lastTap < 300) { e.preventDefault(); const r = v.getBoundingClientRect(); jump(e.clientX < r.left + r.width / 2 ? -10 : 10); lastTap = 0; }
-      else lastTap = t;
+      if (t - lastTap < 300) { e.preventDefault(); clearTimeout(tapT); const r = v.getBoundingClientRect(); jump(e.clientX < r.left + r.width / 2 ? -10 : 10); lastTap = 0; }
+      else { lastTap = t; clearTimeout(tapT); tapT = setTimeout(() => bar(), 320); }      // one tap: the bar and the skip buttons
     });
+    // the phone's media notification (and the lock screen): play/pause, 10 s back and on, ✕
+    const label = it.kind === "tv" ? [it.series, epLabel(it)].filter(Boolean).join(" · ") : [(it.authors || [])[0], it.year].filter(Boolean).join(" · ");
+    const me = {
+      command(cmd) {
+        if (cmd === "toggle") v.paused ? v.play().catch(() => {}) : v.pause();
+        else if (cmd === "play") v.play().catch(() => {});
+        else if (cmd === "pause") v.pause();
+        else if (cmd === "fwd" || cmd === "next") jump(10);
+        else if (cmd === "back" || cmd === "prev") jump(-10);
+        else if (cmd === "stop") { v.pause(); Media.hide(me); }
+      },
+    };
+    const note = () => { if (R && R.it === it) Media.show(me, { title: it.title || "", artist: label, kind: "video", playing: !v.paused }); };
+    v.addEventListener("play", () => { note(); if (window.Jukebox) Jukebox.pauseForVideo(); });
+    v.addEventListener("pause", () => { note(); bar(true); });
+    if ("mediaSession" in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({ title: it.title || "", artist: label });
+        navigator.mediaSession.setActionHandler("play", () => v.play()); navigator.mediaSession.setActionHandler("pause", () => v.pause());
+        navigator.mediaSession.setActionHandler("seekbackward", () => jump(-10)); navigator.mediaSession.setActionHandler("seekforward", () => jump(10));
+      } catch (e) {}
+    }
     let resumed = false, lastSave = 0;
     const resume = () => {
       const t = parseFloat(it.last_location) || 0;
@@ -984,7 +1008,7 @@ Object.assign(window.Reader, (() => {
     v.src = (A && A.mediaUrl(R.name)) || R.url;
     // (the iPhone app hands the player the stored file itself: Safari seeks in it far more reliably)
     if (A && A.mediaUrlAsync) A.mediaUrlAsync(R.name).then((u) => { if (u && R && R.it === it) { resumed = false; v.src = u; } });
-    R.cleanup = ((prev) => () => { v.pause(); v.removeAttribute("src"); v.load(); prev && prev(); })(R.cleanup);
+    R.cleanup = ((prev) => () => { v.pause(); v.removeAttribute("src"); v.load(); Media.hide(me); prev && prev(); })(R.cleanup);
     R.toc = async () => {
       const list = siblings(it);
       return list.length ? `<div class="toc-tree">${list.map((e) => `<button class="toc-row ep ${e.id === it.id ? "on" : ""} ${onPhone(e) ? "" : "off"}" data-toc-item="${e.id}"><span class="ep-c">${esc(epLabel(e))}</span><span class="ep-t">${esc(e.title || "")}</span>${e.watched ? "<span>✓</span>" : e.progress > 0.02 ? `<span>${Math.round(e.progress * 100)}%</span>` : ""}</button>`).join("")}</div>
@@ -1161,8 +1185,19 @@ Object.assign(window.Reader, (() => {
     if (n) { closeSheet(); R.go(n); }
   });
 
+  /* a page-turn button: a page on, or back; a book that scrolls moves a screenful, and on into the next chapter at its end */
+  function pageKey(d) {
+    if (!R || !$("#rSheet")?.hidden || !$("#rLight")?.hidden) return;      // (not under a sheet)
+    const sc = [...document.querySelectorAll("#reader .epub-container, #rStage")].find((e) => e.scrollHeight > e.clientHeight + 4);
+    if (sc) {
+      const end = d > 0 ? sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4 : sc.scrollTop <= 2;
+      if (!end) { sc.scrollBy({ top: d * sc.clientHeight * 0.88, behavior: S.eink ? "auto" : "smooth" }); return; }
+    }
+    if (R.step) R.step(d);
+  }
+
   return {
-    start, close, saveNow,
+    start, close, saveNow, pageKey,
     // the computer gave a note its own number: carry on showing it as the same note
     renamed(from, to) { if (R && R.active === from) R.active = to; if (R && !$("#rSheet")?.hidden) redraw(); },
     get busy() { return !!(R && (!$("#rSheet")?.hidden || !$("#rLight")?.hidden)); },
