@@ -1250,3 +1250,10 @@ html.tabs-off .hw-swap{--tabs-w:0px!important}
 html.eink .btm-tfa,html.eink .btm-qotd{background:#fff!important;color:#000!important}
 html.eink .btm-q::before,html.eink .btm-q cite,html.eink .btm-qotd header h3,html.eink .btm-tfa-page p::first-letter{color:#000!important}
 .btm-q{margin-top:24px}
+
+/* a profile's PIN */
+.keep-ask .pin-field{display:flex;flex-direction:column;gap:4px;margin:0 0 10px}
+.keep-ask .pin-field input{font-size:1.1rem;padding:10px 12px;letter-spacing:.2em;width:100%;box-sizing:border-box}
+.only-me{align-items:center}
+.only-me span{display:flex;flex-direction:column;gap:2px}
+.only-me small{font-size:.8rem}

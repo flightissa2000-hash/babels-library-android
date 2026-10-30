@@ -105,11 +105,18 @@ const Prof = {
   async switchTo(id) {
     if (this.server) {
       if (!S.conn.token) return toast("Pair with the computer first");
+      const to = this.list.find((p) => p.id === id);
+      let pin;
+      if (to && to.locked) {            // (a profile with a PIN: the computer checks it)
+        const a = await askPin(`${to.face} ${to.name}'s PIN`, "");
+        if (!a) return;
+        pin = a.pin;
+      }
       if (Reader.open) Reader.close();
       toast("Switching…");
       try {
         await sync();                    // (what this profile changed here goes first)
-        await api("POST", "/sync/profile", { id });
+        await api("POST", "/sync/profile", { id, pin });
       } catch (e) { return toast(e.offline ? "Switching profiles needs the computer (home Wi-Fi or “from anywhere”)" : e.message); }
       this.cur = id; store("sprofiles.json", { list: this.list, cur: id });
       if (A && A.setBookmarks) A.setBookmarks("[]");      // (the browser's bookmarks are the profile's: its own come with the sync)
@@ -131,6 +138,21 @@ const Prof = {
     paintProfile();
     render();
     toast(`${this.me().face} ${this.me().name}'s library`);
+  },
+  // a PIN for the profile this phone is using: set, changed, or taken off (empty)
+  async pin() {
+    const p = this.me();
+    const a = await askPin(p.locked ? `${p.name}'s PIN` : `A PIN for ${p.name}`,
+      p.locked ? "Type the new one, or leave it empty to take the PIN off." : "Whoever switches to this profile (on a phone or the computer) will need it. Numbers or a password, 4 or more characters.",
+      p.locked ? [["old", "Current PIN"], ["pin", "New PIN (empty: none)"], ["again", "New PIN again"]] : [["pin", "PIN"], ["again", "Again"]], "Save");
+    if (!a) return;
+    if (a.pin !== a.again) return toast("The two PINs don't match");
+    try {
+      const r = await api("POST", "/sync/profile", { setpin: a.pin, old: a.old });
+      this.fromServer(r.profiles, r.current);
+      toast(this.me().locked ? "PIN saved" : "PIN taken off");
+      render();
+    } catch (e) { toast(e.offline ? "Setting a PIN needs the computer" : e.message); }
   },
   async rename(id, fields) {           // (on the computer's list)
     const r = await api("POST", "/sync/profile", { edit: id, ...fields });
@@ -170,6 +192,7 @@ document.addEventListener("click", async (e) => {
     paintProfile(); f.textContent = p.face; return;
   }
   const u = t.closest("[data-prof-use]"); if (u) return Prof.switchTo(Prof.server ? Number(u.dataset.profUse) : u.dataset.profUse);
+  if (t.closest("[data-prof-pin]")) return Prof.pin();
   const d = t.closest("[data-prof-del]");
   if (d) {
     const p = Prof.list.find((x) => x.id === d.dataset.profDel);
@@ -261,6 +284,21 @@ function toast(msg) {
 }
 
 /* a small question with a few answers (a sheet from the bottom); resolves to the chosen answer's value, or null */
+/* a PIN (or password) or two: fields [[name, label], …] → {name: value}, or null if it's dismissed */
+function askPin(title, text, fields = [["pin", "PIN"]], ok = "OK") {
+  return new Promise((done) => {
+    const w = document.createElement("div");
+    w.className = "keep-ask";
+    w.innerHTML = `<form class="ka-card" role="dialog"><h3>${esc(title)}</h3>${text ? `<p>${esc(text)}</p>` : ""}
+      ${fields.map(([n, l]) => `<label class="field pin-field"><span>${esc(l)}</span><input type="password" name="${n}" autocomplete="off" maxlength="64"></label>`).join("")}
+      <div class="ka-row"><button class="btn primary">${esc(ok)}</button><button type="button" class="btn" data-x>Cancel</button></div></form>`;
+    const end = (v) => { w.remove(); done(v); };
+    w.querySelector("form").onsubmit = (e) => { e.preventDefault(); end(Object.fromEntries(fields.map(([n]) => [n, w.querySelector(`[name=${n}]`).value]))); };
+    w.onclick = (e) => { if (e.target.closest("[data-x]") || e.target === w) end(null); };
+    document.body.append(w);
+    w.querySelector("input").focus();
+  });
+}
 function askKeep(title, text, answers) {
   return new Promise((done) => {
     const w = document.createElement("div");
@@ -1329,8 +1367,10 @@ function renderSettings(v) {
       <div class="prof-list">${Prof.list.map((p) => `<div class="prof-row ${p.id === Prof.cur ? "on" : ""}">
         <button class="prof-face" data-prof-face="${p.id}" aria-label="Change the picture">${p.face}</button>
         <span class="prof-who"><input data-prof-name="${p.id}" value="${esc(p.name)}" maxlength="24" aria-label="Name"><small>${Prof.server ? (p.id === Prof.cur ? "This phone" : "") : p.id === "main" ? "Synced with the computer" : "Progress on this phone only"}</small></span>
+        ${p.locked ? `<span title="Has a PIN">🔒</span>` : ""}
         ${p.id === Prof.cur ? `<span class="badge">In use</span>` : `<button class="btn sm" data-prof-use="${p.id}">Use</button>`}
         ${p.id !== "main" && !Prof.server ? `<button class="btn sm danger" data-prof-del="${p.id}" aria-label="Remove">✕</button>` : ""}</div>`).join("")}</div>
+      ${Prof.server ? `<button class="btn" data-prof-pin>🔑 ${Prof.me().locked ? `Change or remove ${esc(Prof.me().name)}'s PIN` : `Give ${esc(Prof.me().name)} a PIN`}</button>` : ""}
       <form class="prof-add" id="profAdd"><input id="profNew" maxlength="24" placeholder="A name" autocomplete="off"><button class="btn">＋ Add a profile</button></form></div>
     <div class="panel"><h3>Files on this phone</h3><p class="hint">${Object.keys(S.files).length} files · ${A ? fmtSize(A.freeSpace()) : "?"} free</p>
       <button class="btn" id="myFiles">See what's on the phone</button></div>
@@ -1476,7 +1516,7 @@ async function fullDetails(id) {
     ${!media && cites ? `<h3 style="margin-top:16px">Citations</h3><div class="cites">${cites}</div>` : ""}
     <h3 style="margin-top:16px">Details</h3>
     <form class="it-form" id="itForm">
-      ${Prof.server && (Prof.list.length > 1 || d.private_to) ? `<label class="check full"><input type="checkbox" name="private" ${d.private_to ? "checked" : ""}> 🔒 Only me <small class="hint">(hidden from the other profiles)</small></label>` : ""}
+      ${Prof.server ? `<label class="check full only-me"><input type="checkbox" name="private" ${d.private_to ? "checked" : ""}><span><b>🔒 Only me</b><small class="hint">(${Prof.list.length > 1 ? "hidden from the other profiles" : "hidden from profiles added later; there's only one now"})</small></span></label>` : ""}
       <label class="field full"><span>Shelf</span><select name="shelf">${SHELVES.map(([k, n]) => `<option value="${k}" ${shelfOf(d) === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       ${F("title", "Title", d.title, "text", true)}
       <label class="field full"><span>${vid ? "Directors / creators" : d.kind === "music" ? "Artists" : "Authors"} (one per line)</span><textarea name="authors" rows="2">${esc((d.authors || []).join("\n"))}</textarea></label>
@@ -1504,11 +1544,25 @@ async function fullDetails(id) {
   $("#itForm").addEventListener("change", async (e) => {
     const el = e.target;
     if (el.name === "private") {
+      const on = el.checked, it = S.items[id];
+      let these = [id];
+      if (it && inSeries(it)) {           // one volume of a series (or episode of a show): just this one, or all of it?
+        const k = seriesKey(it.series);
+        const rest = Object.values(S.items).filter((x) => x.id !== it.id && inSeries(x) && seriesKey(x.series) === k && !!x.private_to !== on);
+        if (rest.length) {
+          const whole = it.kind === "tv" ? "the whole show" : "the whole series";
+          const a = await askKeep(on ? `Hide ${whole}?` : `Show ${whole} again?`, `“${it.series}” has ${rest.length} more ${rest.length > 1 ? "items" : "item"} in the library.`,
+            [["Just this one", "one"], [`${whole[0].toUpperCase()}${whole.slice(1)} (${rest.length + 1})`, "all", "primary"]]);
+          if (a == null) { el.checked = !on; return; }
+          if (a === "all") these = [id, ...rest.map((x) => x.id)];
+        }
+      }
       try {
-        await api("POST", `/sync/item/${id}/edit`, { private: el.checked });
-        if (S.items[id]) { S.items[id].private_to = el.checked ? Prof.cur : null; saveLibrary(true); }
-        return toast(el.checked ? "Hidden from the other profiles" : "Everyone can see it again");
-      } catch (err) { el.checked = !el.checked; return toast(err.message); }
+        await Promise.all(these.map((x) => api("POST", `/sync/item/${x}/edit`, { private: on })));
+        for (const x of these) if (S.items[x]) S.items[x].private_to = on ? Prof.cur : null;
+        saveLibrary(true);
+        return toast(on ? `${these.length > 1 ? these.length + " items h" : "H"}idden from the other profiles` : `${these.length > 1 ? these.length + " items" : "It"} can be seen by everyone again`);
+      } catch (err) { el.checked = !on; return toast(err.message); }
     }
     if (el.name === "shelf") {           // another shelf: Books, Manga, Comics, papers, news stories, films, TV, music
       const f = SHELF_FIELDS[el.value];
