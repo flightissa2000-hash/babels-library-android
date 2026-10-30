@@ -77,12 +77,14 @@ const Prof = {
   /* the computer's answer: its profiles, and which one this phone is */
   fromServer(list, cur) {
     if (!list || !list.length) return;
-    const old = this.server ? [] : this.list.filter((p) => p.id !== "main");
+    // (the phone's own profiles wait in profiles.json until the computer has them, so a failed try is tried again)
+    const old = (this.server ? load("profiles.json", null) || [] : this.list).filter((p) => p.id !== "main");
+    if (!this.server && !this.isMain()) store("profile-wanted.json", this.cur);       // (the one in use: switched to once it's there)
     if (!this.server && !this.isMain()) { this.cur = "main"; this.marks = {}; this.apply(); }
     const changed = !this.server || this.cur !== cur || JSON.stringify(this.list) !== JSON.stringify(list);
     this.server = true; this.list = list; this.cur = cur;
     store("sprofiles.json", { list, cur });
-    if (old.length) setTimeout(() => this.migrate(old), 500);
+    if (old.length && !this.migrating) { this.migrating = true; setTimeout(() => this.migrate(old).finally(() => { this.migrating = false; }), 500); }
     if (changed) paintProfile();
   },
   async migrate(old) {
@@ -101,6 +103,11 @@ const Prof = {
     store("profiles.json", null);
     const r = await api("GET", "/sync/profiles").catch(() => null);
     if (r) this.fromServer(r.profiles, r.current);
+    // the phone was being used as one of its own profiles: it carries on as that profile, now the computer's
+    const want = load("profile-wanted.json", null) || load("profile.json", null), was = want && old.find((p) => p.id === want);
+    store("profile-wanted.json", null); store("profile.json", null);
+    const to = was && this.list.find((x) => x.name.toLowerCase() === was.name.toLowerCase());
+    if (to && to.id !== this.cur && !to.locked) this.switchTo(to.id);
   },
   async switchTo(id) {
     if (this.server) {
