@@ -66,12 +66,80 @@ const Journal = (() => {
       <div id="jList">${html || `<p class="empty">${S.jq ? "Nothing matches." : W() ? "No pages yet. ＋ New starts one; ✎ Quick notes can be put here too." : "Your journal is empty. Books and films you review on the computer show up here too."}</p>`}
       ${rows.length > S.limit ? `<button class="btn more" id="more">Show more</button>` : ""}</div></div>`;
   }
+  // a journal entry's picture: its own cover (chosen in the journal) first, then the library's, then its kind's icon
+  function logCover(l, it, style = "") {
+    if (l.cover_v && /^\d+$/.test(String(l.id)))
+      return `<span class="cov" style="--c:${colorFor(l)};${style}"><img alt="" src="/net/sync/log/${l.id}/cover?v=${l.cover_v}" onerror="this.parentNode.classList.add('nocov');this.remove()"><span class="ph">${esc(l.title)}</span></span>`;
+    return it ? cover(it, false) : `<span class="cov j-ico" style="--c:${colorFor(l)};${style}"><span class="ph"${style ? ' style="font-size:2rem"' : ""}>${KIND_ICON[l.kind] || "✦"}</span></span>`;
+  }
+  // choose a cover: search posters, book covers and game boxes by the title, a picture's web address, or one from the phone
+  function coverPicker(l) {
+    if (!/^\d+$/.test(String(l.id))) return toast("Sync first: the computer hasn't got this entry yet");
+    const w = document.createElement("div");
+    w.className = "keep-ask j-cpick";
+    w.innerHTML = `<div class="ka-card" role="dialog"><h3>A cover for “${esc(l.title)}”</h3>
+      <form class="j-cp-row" data-cps><input name="q" value="${esc(l.title)}" placeholder="search for it…" autocomplete="off"><button class="btn primary">Search</button></form>
+      <div class="j-cp-grid"><p class="hint">Looking…</p></div>
+      <form class="j-cp-row" data-cpu><input name="u" inputmode="url" placeholder="or paste a picture's web address" autocomplete="off"><button class="btn">Use</button></form>
+      <div class="ka-row"><label class="btn">📷 A picture on this phone<input type="file" accept="image/*" hidden></label>
+        ${l.cover_v ? `<button class="btn danger" data-cpoff>Take the cover off</button>` : ""}<button class="btn" data-x>Cancel</button></div></div>`;
+    const grid = w.querySelector(".j-cp-grid");
+    let found = [];
+    const search = async (q) => {
+      grid.innerHTML = `<p class="hint">Looking…</p>`;
+      try { found = await api("GET", `/sync/log/covers?kind=${encodeURIComponent(l.kind)}&q=${encodeURIComponent(q)}`); }
+      catch (e) { grid.innerHTML = `<p class="hint">${esc(e.offline ? "Choosing a cover needs the computer." : e.message)}</p>`; return; }
+      grid.innerHTML = found.length ? found.map((c, i) => `<button class="j-cp-hit" data-cp="${i}"><img loading="lazy" alt="" src="${esc(c.img)}" onerror="this.closest('button').remove()"><b>${esc(c.title)}</b><small>${esc(c.sub || "")}</small></button>`).join("")
+        : `<p class="hint">Nothing found. Try other words, or paste a picture's address.</p>`;
+    };
+    const choose = async (body) => {
+      w.querySelector(".ka-card").classList.add("busy");
+      try {
+        const r = await api("POST", `/sync/log/${l.id}/cover`, body);
+        l.cover_v = r.cover_v;
+        saveLibrary(true);
+        w.remove();
+        toast(body.remove ? "Cover taken off" : "Cover saved");
+        open(l.id);
+        if (S.tab === "journal") render();
+      } catch (e) { w.querySelector(".ka-card").classList.remove("busy"); toast(e.offline ? "Choosing a cover needs the computer" : e.message); }
+    };
+    w.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (e.target.matches("[data-cps]")) search(e.target.q.value.trim());
+      else if (e.target.u.value.trim()) choose({ url: e.target.u.value.trim() });
+    });
+    w.addEventListener("click", (e) => {
+      const h = e.target.closest("[data-cp]");
+      if (h) return choose({ url: found[Number(h.dataset.cp)].img });
+      if (e.target.closest("[data-cpoff]")) return choose({ remove: true });
+      if (e.target.closest("[data-x]") || e.target === w) w.remove();
+    });
+    w.querySelector("input[type=file]").addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      // (a phone photo can be large: sent as a JPEG no wider than 1000px)
+      const img = new Image(), url = URL.createObjectURL(f);
+      img.onload = () => {
+        const k = Math.min(1, 1000 / img.width), c = document.createElement("canvas");
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        choose({ data: c.toDataURL("image/jpeg", 0.88) });
+      };
+      img.onerror = () => toast("That picture couldn't be opened");
+      img.src = url;
+    });
+    document.body.append(w);
+    search(l.title);
+  }
+
   function rowHtml(l) {
     const it = l.item_id && S.items[l.item_id];
     const ents = entriesOf(l), n = ents.length || l.entries || 0, st = statusOf(l);
     const last = ents[ents.length - 1];
     // the ribbon, the last thing you wrote and the day are always there; each journal style shows what it needs
-    return `<button class="row j-row st-${st || "none"}" data-log="${esc(l.id)}">${it ? cover(it, false) : `<span class="cov j-ico" style="--c:${colorFor(l)}"><span class="ph">${KIND_ICON[l.kind] || "✦"}</span></span>`}
+    return `<button class="row j-row st-${st || "none"}" data-log="${esc(l.id)}">${logCover(l, it)}
       <span class="t"><b>${esc(l.title)}</b><small>${[st && st !== "finished" ? STATUS.find((s) => s[0] === st)?.[1] : "", l.finished ? fmtDay(l.finished) : "", n ? `${n} ${n === 1 ? "entry" : "entries"}` : ""].filter(Boolean).map(esc).join(" · ")}</small>
         ${last ? `<span class="j-quote">${esc(last.body.slice(0, 140))}${last.body.length > 140 ? "…" : ""}</span>` : ""}</span>
       ${l.kind === "writing" ? "" : `<em class="j-rib">${esc(STATUS.find((s) => s[0] === st)?.[1] || "In journal")}</em>`}
@@ -88,8 +156,9 @@ const Journal = (() => {
     const sh = $("#sheet");
     sh.innerHTML = `<div class="sheet-bar"><button class="back" data-close>‹</button><h2>${esc(l.title)}</h2></div>
       <div class="it-body" style="padding-top:14px">
-        <div class="j-head">${it ? `<button class="card" data-item="${it.id}" style="width:96px">${cover(it, false)}</button>` : `<span class="cov j-ico" style="--c:${colorFor(l)};width:96px"><span class="ph" style="font-size:2rem">${KIND_ICON[l.kind] || "✦"}</span></span>`}
-          <div><h3>${esc(l.title)}</h3><p class="hint">${esc({ book: "Book", movie: "Film", show: "TV show", game: "Game", other: "Other", writing: "Writing notebook" }[l.kind] || "")}${it ? " · in your library" : ""}</p></div></div>
+        <div class="j-head">${it && !l.cover_v ? `<button class="card" data-item="${it.id}" style="width:96px">${cover(it, false)}</button>` : l.kind === "writing" ? logCover(l, it, "width:96px") : `<button class="card" data-jcover style="width:96px">${logCover(l, it, "width:96px")}</button>`}
+          <div><h3>${esc(l.title)}</h3><p class="hint">${esc({ book: "Book", movie: "Film", show: "TV show", game: "Game", other: "Other", writing: "Writing notebook" }[l.kind] || "")}${it ? " · in your library" : ""}</p>
+            ${l.kind === "writing" ? "" : `<button class="btn sm" data-jcover>🖼 ${l.cover_v || it?.has_cover ? "Change the cover" : "Add a cover"}</button>`}</div></div>
         ${l.kind === "writing" ? "" : `<div class="chips j-status">${STATUS.map(([k, n]) => `<button data-jset="${k}" class="${st === k ? "on" : ""}">${n}</button>`).join("")}</div>
         <div class="j-fields">
           <label class="field"><span>Finished on</span><input type="date" id="jFin" value="${esc(l.finished || "")}"></label>
@@ -238,6 +307,7 @@ const Journal = (() => {
       return open(l.id);
     }
     const lg = t.closest("[data-log]"); if (lg) return open(lg.dataset.log);
+    if (t.closest("[data-jcover]") && openId != null) { const l = logById(openId); if (l) coverPicker(l); return; }
     if (t.closest("#jNew")) return newLog();
     if (t.closest("#qNote")) { if (skipQuickClick) { skipQuickClick = false; return; } return openQuick(); }
     if (t.closest("#qAdd")) {
