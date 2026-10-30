@@ -365,7 +365,7 @@ const Online = (() => {
   }
 
   /* the computer couldn't be reached (or this phone isn't paired): answer here if this is something the web can answer */
-  const handles = (method, path) => /^\/sync\/(news\/(science|local|article)|cat\/(promos|browse|subjects|search|byauthor|info|reviews|series|authors)|potd)\b/.test(path) || (method === "POST" && QUEUE.test(path.split("?")[0]));
+  const handles = (method, path) => /^\/sync\/(news\/(science|local|article)|cat\/(promos|browse|subjects|search|byauthor|info|reviews|series|authors)|potd|define)\b/.test(path) || (method === "POST" && QUEUE.test(path.split("?")[0]));
   async function answer(method, path, body) {
     const [p, qs] = path.split("?"), q = new URLSearchParams(qs || ""), fresh = q.has("fresh");
     if (method === "POST" && p === "/sync/news/place") return setPlace(body || {});
@@ -380,6 +380,7 @@ const Online = (() => {
       else if (p === "/sync/news/local") d = await local(fresh);
       else if (p === "/sync/news/article") d = await article(q.get("url") || "");
       else if (p === "/sync/potd") d = await potd();
+      else if (p === "/sync/define") d = await define(q.get("w") || "");
       else d = await catalogue(p.split("/").pop(), q);
       return d;
     } catch (e) {
@@ -394,6 +395,29 @@ const Online = (() => {
     const id = -Date.now();
     S.items[id] = { id, title: r.title, authors: r.authors || [], year: r.year, kind: { manga: "graphic", comic: "graphic", movie: "movie", tv: "tv" }[r.cat] || "book", wanted: 1, has_file: 0, has_cover: 0, added_at: now(), _local: true };
     saveLibrary(true);
+  }
+  /* the readers' dictionary straight from Wiktionary (each word kept on the phone once looked up, for offline) */
+  async function define(word) {
+    word = word.trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").slice(0, 60);
+    const kept = load("dictionary.json", {});
+    if (kept[word.toLowerCase()]) return kept[word.toLowerCase()];
+    const strip = (h) => { const el = document.createElement("div"); el.innerHTML = h || ""; return el.textContent.replace(/\s+/g, " ").trim(); };
+    const url = (w) => "https://en.wiktionary.org/wiki/" + encodeURIComponent(w.replace(/ /g, "_"));
+    let out = { word, senses: [], url: url(word) };
+    for (const w of [...new Set([word.toLowerCase(), word, word[0].toUpperCase() + word.slice(1)])]) {
+      let data;
+      try { data = await web("https://en.wiktionary.org/api/rest_v1/page/definition/" + encodeURIComponent(w.replace(/ /g, "_")), { json: true }); }
+      catch (e) { if (/404/.test(e.message)) continue; throw e; }
+      const senses = (data.en || []).slice(0, 4).map((sec) => ({ pos: sec.partOfSpeech || "", defs: (sec.definitions || []).map((d) => ({ d: strip(d.definition).slice(0, 400),
+        ex: strip(((d.parsedExamples || [])[0] || {}).example || (d.examples || [])[0] || "").slice(0, 240) })).filter((x) => x.d).slice(0, 4) })).filter((s) => s.defs.length);
+      const real = senses.filter((s) => s.pos !== "Symbol");          // (language codes and the like, only if there's nothing else)
+      if (senses.length) { out = { word: w, senses: real.length ? real : senses, url: url(w) }; break; }
+    }
+    const keys = Object.keys(kept);
+    if (keys.length > 400) delete kept[keys[0]];
+    kept[word.toLowerCase()] = out;
+    store("dictionary.json", kept);
+    return out;
   }
   async function potd() {
     const d = new Date(), iso = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;

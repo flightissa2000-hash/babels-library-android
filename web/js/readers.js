@@ -28,7 +28,7 @@ Object.assign(window.Reader, (() => {
         <span class="r-tools">${tools}</span><time class="r-clock"></time></div>
       <div class="r-stage" id="rStage"></div>
       <div class="r-foot" id="rFoot"><span id="rPos"></span></div>
-      <div class="r-pop" id="rPop" hidden>${Object.keys(HLV).map((c) => `<button data-hl="${c}" style="background:${hl(c)}" aria-label="Highlight ${c}"></button>`).join("")}<button data-hl="note" class="r-pop-note">✎ Note</button></div>
+      <div class="r-pop" id="rPop" hidden>${Object.keys(HLV).map((c) => `<button data-hl="${c}" style="background:${hl(c)}" aria-label="Highlight ${c}"></button>`).join("")}<button data-hl="note" class="r-pop-note">✎ Note</button><button data-define class="r-pop-note">📖 Define</button></div>
       <div class="r-sheet" id="rSheet" hidden></div><div class="r-light" id="rLight" hidden></div>`;
     el.hidden = false;
     el.classList.remove("calm", "pin-mode");
@@ -256,6 +256,32 @@ Object.assign(window.Reader, (() => {
     p.style.top = Math.max(60, Math.min(innerHeight - h - 70, y + 16)) + "px";
   }
   const hidePop = () => { const p = $("#rPop"); if (p) p.hidden = true; };
+  /* the dictionary: the selected word's meanings (from the computer, or straight from Wiktionary), in a sheet */
+  function define() {
+    const p = R && R.pending_hl;
+    if (!p) return;
+    hidePop();
+    return lookUp(p.quote.trim().split(/\s+/).slice(0, 3).join(" "));
+  }
+  async function lookUp(word) {
+    const canHl = !!(R && R.pending_hl);
+    let card = $("#rDict");
+    if (!card) { card = document.createElement("div"); card.id = "rDict"; card.className = "keep-ask r-dict"; document.body.append(card); }
+    const show = (inner) => { card.innerHTML = `<div class="ka-card"><div class="rd-head"><b>${esc(word)}</b><button class="btn sm" data-rdx>✕</button></div>${inner}</div>`; card.hidden = false; };
+    show(`<p class="hint">Looking it up…</p>`);
+    let d;
+    try { d = await api("GET", `/sync/define?w=${encodeURIComponent(word)}`); }
+    catch (e) { return show(`<p class="hint">${esc(e.offline ? "The dictionary needs the internet." : e.message)}</p>`); }
+    show(`<div class="rd-body">${d.senses.length ? d.senses.map((s) => `<section><em>${esc(s.pos)}</em><ol>${s.defs.map((x) => `<li>${esc(x.d)}${x.ex ? `<q>${esc(x.ex)}</q>` : ""}</li>`).join("")}</ol></section>`).join("")
+      : `<p class="hint">No definition found for “${esc(d.word)}”.</p>`}</div>
+      <div class="ka-row">${canHl ? `<button class="btn" data-rdhl>Highlight it</button>` : ""}<button class="btn" data-go-url="${esc(d.url)}">More on Wiktionary ↗</button></div>`);
+  }
+  document.addEventListener("click", (e) => {
+    const card = $("#rDict");
+    if (!card || card.hidden) return;
+    if (e.target.closest("[data-rdhl]")) { card.hidden = true; return fromPending("yellow"); }
+    if (e.target.closest("[data-rdx]") || e.target === card || e.target.closest("[data-go-url]")) card.hidden = true;
+  });
   function fromPending(color) {
     const p = R.pending_hl;
     hidePop();
@@ -1123,6 +1149,7 @@ Object.assign(window.Reader, (() => {
       if (k === "nextEp") return episode(1);
     }
     const h = t.closest("[data-hl]"); if (h) { e.preventDefault(); return fromPending(h.dataset.hl); }
+    if (t.closest("#rPop [data-define]")) { e.preventDefault(); return define(); }
     if (t.closest("[data-rs-close]")) return closeSheet();
     const s = t.closest("#rSheet");
     if (!s) return;
@@ -1197,7 +1224,7 @@ Object.assign(window.Reader, (() => {
   }
 
   return {
-    start, close, saveNow, pageKey,
+    start, close, saveNow, pageKey, lookUp,
     // the computer gave a note its own number: carry on showing it as the same note
     renamed(from, to) { if (R && R.active === from) R.active = to; if (R && !$("#rSheet")?.hidden) redraw(); },
     get busy() { return !!(R && (!$("#rSheet")?.hidden || !$("#rLight")?.hidden)); },

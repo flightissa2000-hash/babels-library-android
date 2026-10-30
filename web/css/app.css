@@ -1292,3 +1292,15 @@ html.eink .btm-q p::after{color:#000!important}
   .btm-potd{max-width:560px;margin-left:auto;margin-right:auto}
   .ct-grid{grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:18px 16px}
 }
+
+/* the readers' dictionary */
+.r-dict{z-index:70}
+.r-dict .ka-card{max-height:70vh;display:flex;flex-direction:column}
+.rd-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.rd-head b{font:700 1.35rem "Libre Baskerville",Georgia,serif}
+.rd-body{overflow:auto;margin:0 0 12px}
+.rd-body section{margin:8px 0}
+.rd-body em{font:italic .85rem "Libre Baskerville",Georgia,serif;color:var(--accent)}
+.rd-body ol{margin:4px 0 0;padding-left:20px;font:400 .95rem/1.5 "Libre Baskerville",Georgia,serif}
+.rd-body li{margin:5px 0}
+.rd-body q{display:block;margin-top:2px;font-style:italic;color:var(--ink-soft);font-size:.85rem}
