@@ -1126,6 +1126,46 @@ html[data-nav=folders] .hw-swap{--tabs-w:46px}
 
 /* e-reader mode (Settings → Look): for e-ink screens. Nothing moves (every animation and transition is a smear of
    ghosting there), no shadows, blurs or gradients, and the reader is plain black on white */
+/* the E-reader theme: every theme variable, black on white, so it reaches the whole app */
+[data-theme=eink]{
+  --bg:#fff;--surface:#fff;--ink:#000;--ink-soft:#333;--line:#000;--accent:#000;--accent-ink:#fff;--accent2:#444;--ok:#000;--danger:#000;--hover:rgba(0,0,0,.06);
+  --font-display:Georgia,"Times New Roman",serif;--font-body:Georgia,"Times New Roman",serif;--font-ui:"Nunito",sans-serif;--display-weight:700;
+  --texture:none;--radius-sm:6px;--radius-lg:10px;--radius-cover:2px;
+  --bar-bg:#fff;--bar-ink:#000;--bar-border:2px solid #000;--bar-shadow:none;
+  --field-bg:#fff;--field-border:1.5px solid #000;
+  --btn-bg:#fff;--btn-ink:#000;--btn-border:1.5px solid #000;--btn-shadow:none;
+  --tag-bg:#fff;--tag-ink:#000;--tag-border:1px solid #000;--radius-tag:4px;
+  --shelf-back:#fff;--plank:3px solid #000;--plank-c:#000;--plank-h:3px;--plank-shadow:none;
+  --spine-radius:2px;--spine-shadow:inset 0 0 0 1.5px #000;--spine-pattern:none;
+  --cover-shadow:0 0 0 1.5px #000;--cover-pattern:none;
+  --town-ground:#fff;--district-bg:#fff;--district-border:2px solid #000;
+  --sign-bg:#fff;--sign-ink:#000;--sign-shadow:none;
+  --window:#ddd;--door:#000;--label-bg:#fff;--label-border:1.5px solid #000;
+  --stage-bg:#fff;--stage-ink:#000;--hrow-bg:#fff;--hrow-sel:#000;--hrow-sel-ink:#fff;
+  --burst:none;--toast-bg:#000;--toast-ink:#fff;
+  --dlg-border:2px solid #000;--drawer-border:2px solid #000;
+  --hl-yellow:#ddd;--hl-green:#bbb;--hl-blue:#999;--hl-pink:#777;--reader-bg:#fff;
+  --brand-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M6 4h16l4 4v20H6z M10 12h12v2H10z M10 17h12v2H10z M10 22h8v2h-8z' fill-rule='evenodd'/%3E%3C/svg%3E");
+  color-scheme:light;
+}
+/* ...and over every piece that draws its own colours (side tabs, deck, jukebox, Bulletin, browser home, News, journal): plain paper, black ink.
+   Covers and photos keep their colours (colour e-ink screens show them). */
+[data-theme=eink] [data-nav] .tabs button,[data-nav=folders][data-theme=eink] .tabs button{--tabc:#fff}
+[data-theme=eink] :is(.tabs button,.deck,.deck-stage,.deck-binder,.jukebox,.home-orbit,.group-head,.heist-row,.qn-fab,.present,.pc,.ll-manga,
+  [class^="btm-"],[class*=" btm-"],[class^="jx-"],[class*=" jx-"],[class^="bw-"],[class*=" bw-"],[class^="hm-"],[class*=" hm-"],[class^="nz-"],[class*=" nz-"],
+  [class^="ib-"],[class*=" ib-"],[class^="pc-"],[class*=" pc-"],[class^="p-"],[class*=" p-"],[class^="db-"],[class*=" db-"],[class^="gc-"],[class*=" gc-"],[class^="mg-"],[class*=" mg-"],[class^="dk-"],[class*=" dk-"])
+  :is(*):not(img,canvas,video,iframe,.cov,.cov *,.ll-bar,.ll-bar *,.gc-prog i),
+[data-theme=eink] :is(.tabs button,.deck,.deck-stage,.deck-binder,.jukebox,.home-orbit,.group-head,.heist-row,.qn-fab,.present,.pc,.ll-manga,
+  [class^="btm-"],[class*=" btm-"],[class^="jx-"],[class*=" jx-"],[class^="bw-"],[class*=" bw-"],[class^="hm-"],[class*=" hm-"],[class^="nz-"],[class*=" nz-"],
+  [class^="ib-"],[class*=" ib-"],[class^="pc-"],[class*=" pc-"],[class^="p-"],[class*=" p-"],[class^="db-"],[class*=" db-"],[class^="gc-"],[class*=" gc-"],[class^="mg-"],[class*=" mg-"],[class^="dk-"],[class*=" dk-"]):not(img,canvas,video,iframe,.cov,.cov *,.ll-bar,.ll-bar *,.gc-prog i){
+  background-color:#fff!important;background-image:none!important;color:#000!important;border-color:#000!important;-webkit-text-stroke-color:#000!important}
+[data-theme=eink] :is(.tabs button.on,.btm-ribbon,.btm-num,.qn-fab){background-color:#000!important;color:#fff!important}
+[data-theme=eink] .tabs button{box-shadow:inset 0 0 0 1.5px #000!important}
+[data-theme=eink] .jukebox,[data-theme=eink] .deck{border:2px solid #000!important}
+[data-theme=eink] .btm{background:#fff!important;color:#000!important}
+[data-theme=eink] .jukebox .jx-arch .jx-neon{background:transparent!important}
+[data-theme=eink] :is(.btm,.jukebox,.deck,[class^="btm-"],[class*=" btm-"],[class^="bw-"],[class*=" bw-"],[class^="jx-"],[class*=" jx-"])::before,
+[data-theme=eink] :is(.btm,.jukebox,.deck,[class^="btm-"],[class*=" btm-"],[class^="bw-"],[class*=" bw-"],[class^="jx-"],[class*=" jx-"])::after{background-image:none!important;background-color:transparent!important;border-color:#000!important}
 html.eink *,html.eink *::before,html.eink *::after{animation:none!important;transition:none!important;box-shadow:none!important;text-shadow:none!important;backdrop-filter:none!important;filter:none!important}
 html.eink{--bg:#fff;--surface:#fff;--ink:#000;--ink-soft:#333;--line:#000;--accent:#000;--accent-ink:#fff;--accent2:#000;--hl-yellow:#ddd;--hl-green:#bbb;--hl-blue:#999;--hl-pink:#777}
 html.eink body,html.eink .top,html.eink .tabs,html.eink .panel,html.eink .sheet{background:#fff!important;color:#000!important;background-image:none!important}

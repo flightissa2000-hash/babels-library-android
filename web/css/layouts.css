@@ -1,6 +1,20 @@
 /* ===================================================== the library's layouts (js/layouts.js) */
-.lib-ctl:has(.ll-pick){grid-template-columns:1fr 1fr}
-.ll-pick select{width:100%}
+/* the compass: at the end of the kinds row, opening the layouts */
+.lib-kindrow{display:flex;align-items:flex-start;gap:8px}
+.lib-kindrow .lib-kinds{flex:1;min-width:0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+.lib-kindrow .lib-kinds::-webkit-scrollbar{display:none}
+.ll-compass{position:relative;margin-left:auto;flex:none}
+#libCompass{width:38px;height:38px;padding:0;border-radius:50%;border:var(--btn-border,2px solid var(--line));background:var(--btn-bg,var(--surface));box-shadow:var(--btn-shadow,none);color:var(--btn-ink,var(--ink));display:grid;place-items:center;cursor:pointer}
+#libCompass svg{width:24px;height:24px}
+.ll-menu{position:absolute;right:0;top:46px;z-index:40;width:min(300px,86vw);padding:6px;border:var(--dlg-border,2px solid var(--line));border-radius:var(--radius-sm,12px);background:var(--surface);color:var(--ink);box-shadow:0 10px 28px rgba(0,0,0,.3)}
+.ll-menu[hidden]{display:none}
+.ll-menu button{display:flex;align-items:center;gap:10px;width:100%;padding:8px;border:0;border-radius:calc(var(--radius-sm,12px) - 4px);background:none;color:inherit;text-align:left;font:inherit;cursor:pointer}
+.ll-menu button i{flex:0 0 26px;font-style:normal;font-size:1.1rem;text-align:center}
+.ll-menu button span{display:flex;flex-direction:column;min-width:0}
+.ll-menu button b{font:800 .86rem var(--font-ui,sans-serif)}
+.ll-menu button small{font-size:.7rem;color:var(--ink-soft);line-height:1.25}
+.ll-menu button.on{background:var(--accent);color:var(--accent-ink,#fff)}
+.ll-menu button.on small{color:inherit;opacity:.85}
 .ll h3{display:flex;align-items:baseline;gap:8px;margin:18px 2px 8px;font-size:1rem}
 .ll h3 small{font-weight:400;color:var(--ink-soft);font-size:.8rem}
 .ll button{font:inherit;color:inherit;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
@@ -9,7 +23,7 @@
 .ll-n{position:absolute;right:4px;top:4px;padding:1px 6px;border-radius:99px;background:rgba(0,0,0,.72);color:#fff;font:800 .68rem var(--font-ui,sans-serif);font-style:normal}
 
 /* shelves: the computer's covers-on-shelves */
-.ll-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:16px 12px;padding:10px 6px 16px;border-bottom:6px solid color-mix(in srgb,var(--ink) 18%,transparent);box-shadow:0 8px 10px -8px rgba(0,0,0,.35)}
+.ll-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:16px 12px;padding:10px 6px 16px;border-bottom:var(--plank,6px solid color-mix(in srgb,var(--ink) 18%,transparent));box-shadow:var(--plank-shadow,0 8px 10px -8px rgba(0,0,0,.35));background:var(--shelf-back,transparent);border-radius:var(--radius-sm,10px) var(--radius-sm,10px) 0 0}
 .ll-card{position:relative;display:flex;flex-direction:column;gap:4px;padding:0;border:0;background:none}
 .ll-card .ll-cov{position:relative}
 .ll-card b{font-size:.78rem;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -26,48 +40,6 @@
 .ll-row .ll-r{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:.68rem}
 .ll-row .ll-r em{font-style:normal;font-weight:800;color:var(--accent)}
 
-/* mosaic */
-.ll-mosaic{display:grid;grid-template-columns:repeat(auto-fill,minmax(74px,1fr));gap:4px;margin-top:10px}
-.ll-tile{position:relative;padding:0;border:0;background:none}
-.ll-tile .cov{border-radius:3px;box-shadow:none}
-.ll-tile .ll-bar{position:absolute;left:0;right:0;bottom:0;border-radius:0}
-.ll-tile.st-done{filter:saturate(.6)}
-
-/* inventory: a survival-game backpack */
-.ll-inv{margin-top:10px;padding:10px;border-radius:6px;background:linear-gradient(#2b2f2a,#1b1d1a);border:3px solid #5b5240;box-shadow:inset 0 0 0 2px #0e0f0d,0 6px 18px rgba(0,0,0,.4);color:#e8dfc4;font-family:"IBM Plex Mono",monospace}
-.inv-head{display:flex;gap:10px;align-items:baseline;padding:2px 4px 10px;border-bottom:1px solid #5b5240;margin-bottom:10px;font-size:.75rem}
-.inv-head b{font-size:1rem;letter-spacing:.2em;color:#f2c14e}
-.inv-gold{margin-left:auto;color:#f2c14e}
-.inv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:6px}
-.inv-slot{position:relative;aspect-ratio:1;padding:6px;border:2px solid #3d3a30;border-radius:4px;background:radial-gradient(circle at 50% 40%,#3a3d36,#22241f);overflow:hidden}
-.inv-slot .cov{width:62%;margin:0 auto;box-shadow:0 2px 6px #000}
-.inv-slot.r-unc{border-color:#4caf50;box-shadow:inset 0 0 12px rgba(76,175,80,.4)}
-.inv-slot.r-rare{border-color:#3d8bff;box-shadow:inset 0 0 14px rgba(61,139,255,.5)}
-.inv-slot.r-leg{border-color:#f2a541;box-shadow:inset 0 0 18px rgba(242,165,65,.6),0 0 10px rgba(242,165,65,.35)}
-.inv-slot.r-junk{filter:grayscale(1);opacity:.6}
-.inv-q{position:absolute;right:3px;bottom:2px;font:700 .7rem "IBM Plex Mono",monospace;font-style:normal;color:#fff;text-shadow:0 1px 2px #000}
-.inv-tip{position:absolute;left:0;right:0;bottom:0;padding:2px 4px;background:rgba(0,0,0,.78);display:flex;flex-direction:column;font-size:.55rem;line-height:1.2;transform:translateY(100%);transition:transform .15s}
-.inv-tip b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.inv-tip em{font-style:normal;color:#f2c14e}
-.inv-slot:hover .inv-tip,.inv-slot:focus .inv-tip,.inv-slot:active .inv-tip{transform:none}
-
-/* field guide: a red pocket encyclopedia */
-.ll-dex{margin-top:10px;padding:12px;border-radius:14px 14px 18px 18px;background:linear-gradient(#e3262f,#b51a22);border:3px solid #6e0f14;box-shadow:inset 0 -6px 0 #8f141b,0 8px 20px rgba(0,0,0,.35)}
-.dex-top{display:flex;align-items:center;gap:8px;padding:0 4px 10px}
-.dex-lens{width:34px;height:34px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#c9f2ff,#2fa3e6 45%,#0f5a8f);border:4px solid #fff;box-shadow:0 0 0 2px #6e0f14}
-.dex-led{width:11px;height:11px;border-radius:50%;border:2px solid #6e0f14}
-.dex-led.r{background:#ff5a5a}.dex-led.y{background:#ffd84d}.dex-led.g{background:#5ad66b}
-.dex-screen{padding:8px;border-radius:8px;background:#e8f2d0;border:6px solid #dcdcdc;box-shadow:inset 0 0 0 2px #7b8a5e;color:#203018;font-family:"IBM Plex Mono",monospace;max-height:70vh;overflow:auto}
-.dex-count{display:flex;justify-content:space-between;padding:2px 4px 8px;font-size:.72rem;border-bottom:2px dashed #9fb07a;margin-bottom:6px}
-.dex-row{display:flex;align-items:center;gap:8px;width:100%;padding:4px 6px;border:0;border-radius:4px;background:none}
-.dex-row:nth-child(odd){background:rgba(123,138,94,.12)}
-.dex-no{flex:0 0 58px;font-size:.72rem;font-weight:700}
-.dex-spr{flex:0 0 26px}
-.dex-spr .cov{box-shadow:none;border-radius:2px}
-.dex-row:not(.caught) .dex-spr{filter:brightness(.15) contrast(1.5)}
-.dex-name{flex:1;min-width:0;font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:uppercase}
-.dex-ball{font-size:1rem;color:#c0262c}
-
 /* manga page: panels and screentone, read right to left */
 .ll-manga{direction:rtl;margin-top:10px;display:grid;grid-template-columns:repeat(6,1fr);grid-auto-rows:84px;grid-auto-flow:dense;gap:6px;padding:8px;background:#fff;border:2px solid #111;
   background-image:radial-gradient(rgba(0,0,0,.13) 1px,transparent 1.4px);background-size:6px 6px}
@@ -81,22 +53,6 @@
 .mg-fx{position:absolute;right:6px;top:4px;font:900 1.3rem sans-serif;color:#fff;-webkit-text-stroke:2px #111;transform:rotate(-8deg)}
 .mg-fx.done{color:#e8553a}
 
-/* RPG menu: blue windows and a pointing cursor */
-.ll-jrpg{margin-top:10px;font-family:"IBM Plex Mono",monospace;color:#fff}
-.rpg-win{border:3px solid #fff;border-radius:8px;background:linear-gradient(#2b4fd1,#0a1a6b);box-shadow:0 0 0 2px #0a1a6b,0 6px 16px rgba(0,0,0,.4);text-shadow:2px 2px 0 #000}
-.rpg-head{display:flex;gap:14px;padding:8px 14px;margin-bottom:8px;font-weight:700;letter-spacing:.12em}
-.rpg-gil{margin-left:auto;color:#ffe066}
-.rpg-list{padding:8px 6px;max-height:70vh;overflow:auto}
-.rpg-row{position:relative;display:grid;grid-template-columns:18px 30px 1fr auto;grid-template-rows:auto auto;column-gap:8px;align-items:center;width:100%;padding:6px;border:0;border-radius:4px;background:none;color:#fff}
-.rpg-cur{grid-row:span 2;opacity:0;transition:opacity .1s}
-.rpg-row:hover .rpg-cur,.rpg-row:focus .rpg-cur,.rpg-row:active .rpg-cur{opacity:1}
-.rpg-ic{grid-row:span 2}.rpg-ic .cov{box-shadow:0 0 0 2px #fff;border-radius:2px}
-.rpg-name{font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rpg-lv{font-size:.72rem;color:#ffe066}
-.rpg-hp{grid-column:3 / span 2;height:6px;border:1px solid #fff;background:#0a1a6b}
-.rpg-hp i{display:block;height:100%;background:linear-gradient(90deg,#4cff8a,#20c060)}
-.rpg-x{position:absolute;right:10px;top:4px;font-size:.7rem}
-
 /* gacha: starred cards with a holo sweep */
 .ll-gacha{margin-top:10px}
 .gc-bar{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:linear-gradient(110deg,#ff6ec7,#7873f5 50%,#4adede);color:#fff;font:900 .78rem var(--font-ui,sans-serif);letter-spacing:.1em;text-shadow:0 1px 3px rgba(0,0,0,.4)}
@@ -109,50 +65,16 @@
 .gc-holo{position:absolute;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 30%,rgba(255,255,255,.45) 45%,rgba(160,220,255,.35) 50%,transparent 65%);background-size:250% 100%;animation:gcHolo 3.5s linear infinite;mix-blend-mode:screen;opacity:0}
 .gc-card.s4 .gc-holo,.gc-card.s5 .gc-holo,.gc-card.pulled .gc-holo{opacity:1}
 @keyframes gcHolo{from{background-position:150% 0}to{background-position:-100% 0}}
-.gc-stars{color:#ffcf40;font-size:.72rem;letter-spacing:1px;text-shadow:0 0 4px rgba(255,200,0,.8)}
+.gc-prog{position:relative;display:block;width:100%;height:12px;border-radius:99px;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.35);overflow:hidden}
+.gc-prog i{display:block;height:100%;background:linear-gradient(90deg,#5aa9ff,#c66bff)}
+.gc-card.s5 .gc-prog i{background:linear-gradient(90deg,#ffe066,#ffcf40)}
+.gc-prog em{position:absolute;inset:0;font:900 .58rem/12px var(--font-ui,sans-serif);font-style:normal;text-align:center;color:#fff;text-shadow:0 1px 2px #000;letter-spacing:.05em}
 .gc-card b{font-size:.68rem;line-height:1.2;text-align:center;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .gc-card.pulled{animation:gcPull .9s ease-out;outline:4px solid #fff}
 @keyframes gcPull{0%{transform:scale(.6) rotate(-8deg);filter:brightness(4)}60%{transform:scale(1.12)}100%{transform:none;filter:none}}
 
-/* visual novel: centre stage and a dialogue box */
-.ll-vn{position:relative;margin-top:10px;height:min(68vh,620px);border-radius:12px;overflow:hidden;background:#111}
-.vn-bg{position:absolute;inset:-20px}
-.vn-bg .cov{width:100%;height:100%;aspect-ratio:auto;border-radius:0;filter:blur(18px) brightness(.55) saturate(1.3)}
-.vn-sprite{position:absolute;left:50%;top:6%;width:min(46%,240px);transform:translateX(-50%);filter:drop-shadow(0 10px 24px rgba(0,0,0,.6))}
-.vn-box{position:absolute;left:10px;right:10px;bottom:10px;padding:22px 14px 12px;border:2px solid rgba(255,255,255,.85);border-radius:12px;background:rgba(14,18,40,.88);color:#fff}
-.vn-name{position:absolute;left:14px;top:-14px;padding:3px 14px;border-radius:6px;background:#e8557a;font:800 .78rem var(--font-ui,sans-serif)}
-.vn-title{display:block;font-size:.95rem;margin-bottom:4px}
-.vn-box p{margin:0 0 10px;font-size:.85rem;line-height:1.5;color:#e6e8ff}
-.vn-choices{display:flex;gap:8px;flex-wrap:wrap}
-.vn-choices button{padding:7px 12px;border:1px solid rgba(255,255,255,.6);border-radius:8px;background:rgba(255,255,255,.1);color:#fff;font:700 .8rem var(--font-ui,sans-serif)}
-.vn-choices button:first-child{background:#e8557a;border-color:#e8557a}
-.vn-choices button:disabled{opacity:.35}
-.vn-n{position:absolute;right:12px;bottom:10px;font-size:.65rem;opacity:.6}
-
-/* world map: stages on a winding path */
-.ll-map{margin-top:10px}
-.wm-world{padding:10px;margin-bottom:12px;border-radius:14px;background:linear-gradient(#7fd3ff 0 55%,#79c95a 55%);border:3px solid #2b5a1f;box-shadow:0 5px 0 #2b5a1f}
-.ll-map .wm-world h3{margin:0 0 6px;padding:4px 10px;display:inline-flex;border-radius:8px;background:#fff;border:2px solid #222;color:#222;font:900 .85rem var(--font-ui,sans-serif);letter-spacing:.08em}
-.ll-map .wm-world h3 small{color:#555}
-.wm-path{position:relative;display:flex;gap:6px;overflow-x:auto;padding:14px 10px 18px;scrollbar-width:none;
-  background:repeating-linear-gradient(90deg,#f6e3a8 0 10px,transparent 10px 18px) 0 62%/100% 6px no-repeat}
-.wm-path::-webkit-scrollbar{display:none}
-.wm-node{position:relative;flex:0 0 86px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:0;border:0;background:none;color:#1d2a10}
-.ll .wm-node{text-align:center}
-.wm-node.dn{margin-top:30px}
-.wm-cov{width:62px;height:62px;border-radius:50%;overflow:hidden;border:4px solid #fff;box-shadow:0 0 0 3px #222,0 4px 0 3px #222}
-.wm-cov .cov{width:100%;height:100%;aspect-ratio:auto;border-radius:0;box-shadow:none}
-.wm-node.done .wm-cov{border-color:#ffd84d}
-.wm-node.now .wm-cov{animation:wmBob 1.2s ease-in-out infinite}
-@keyframes wmBob{50%{transform:translateY(-6px)}}
-.wm-flag{position:absolute;top:-8px;right:10px;font-style:normal;color:#e8302a;font-size:1.1rem;text-shadow:0 1px 0 #fff}
-.wm-you{position:absolute;top:-10px;right:8px;font-style:normal;color:#ffd84d;font-size:1.1rem;text-shadow:0 0 3px #000}
-.wm-node small{font:900 .66rem var(--font-ui,sans-serif);background:#222;color:#fff;padding:0 6px;border-radius:4px}
-.wm-node b{font-size:.62rem;line-height:1.15;text-align:center;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-shadow:0 1px 0 rgba(255,255,255,.6)}
-.wm-castle{flex:0 0 auto;align-self:center;font-size:2.4rem;padding:0 10px}
-
 /* e-reader screens: no animations */
-html.eink .gc-holo,html.eink .wm-node.now .wm-cov{animation:none}
+html.eink .gc-holo{display:none}
 
 /* ===================================================== Samsung DeX (and other big screens with a mouse): the computer's layout
    — the sections as a bar along the top, the content in a centred page, the library on shelves */
@@ -172,7 +94,62 @@ html.dex .ll-grid{grid-template-columns:repeat(auto-fill,minmax(132px,1fr))}
 
 /* (touch-ups) */
 .ll-card,.ll-grid>*,.gc-card{min-width:0}
-.ll-map .wm-world h3{white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
-.ll-map .wm-world h3 small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.wm-node b{padding:1px 5px;border-radius:5px;background:rgba(255,255,255,.85);text-shadow:none}
-.rpg-x{right:auto;left:52px;top:2px;padding:0 4px;border-radius:3px;background:#0a1a6b;border:1px solid #fff}
+
+/* ===================================================== the layouts in each theme */
+/* Word Town: chunky navy outlines, offset shadows, candy colours */
+[data-theme=wordtown] .ll h3{font-family:"Fredoka",sans-serif}
+[data-theme=wordtown] .ll-row{box-shadow:0 3px 0 #22304a}
+[data-theme=wordtown] .ll-card .ll-st{border:2px solid #22304a;background:#ffc93c;color:#22304a}
+[data-theme=wordtown] .ll-bar{background:#fff;border:1.5px solid #22304a;height:7px}[data-theme=wordtown] .ll-bar i{background:#ff6b4a}
+[data-theme=wordtown] .ll-manga{background-color:#fff3d6;border:3px solid #22304a;border-radius:14px;box-shadow:0 5px 0 #22304a;background-image:radial-gradient(rgba(255,107,74,.25) 1.4px,transparent 1.8px)}
+[data-theme=wordtown] .mg-panel{border-color:#22304a;border-radius:10px}
+[data-theme=wordtown] .mg-panel .cov{filter:saturate(1.15)}
+[data-theme=wordtown] .mg-bubble{border:2.5px solid #22304a;color:#22304a;font-family:"Fredoka",sans-serif;box-shadow:0 3px 0 #22304a}
+[data-theme=wordtown] .mg-fx{color:#ffc93c;-webkit-text-stroke:2px #22304a;font-family:"Fredoka",sans-serif}
+[data-theme=wordtown] .mg-fx.done{color:#ff6b4a}
+[data-theme=wordtown] .gc-bar{background:linear-gradient(110deg,#ff8fc0,#ffc93c 50%,#8fd17a);border:3px solid #22304a;box-shadow:0 4px 0 #22304a;color:#22304a;text-shadow:none;font-family:"Fredoka",sans-serif}
+[data-theme=wordtown] .gc-pull{border:2.5px solid #22304a;background:#ff6b4a;color:#fff;box-shadow:0 4px 0 #22304a}
+[data-theme=wordtown] .gc-card{border:3px solid #22304a;background:#fff;color:#22304a;box-shadow:0 4px 0 #22304a}
+[data-theme=wordtown] .gc-card.s3{background:#d6f0ff}[data-theme=wordtown] .gc-card.s4{background:#f3e3ff}
+[data-theme=wordtown] .gc-card.s5{background:#fff3c2;box-shadow:0 4px 0 #22304a,0 0 14px rgba(255,201,60,.8)}
+[data-theme=wordtown] .gc-prog{background:#fff;border:2px solid #22304a;height:14px}
+[data-theme=wordtown] .gc-prog i{background:#4aa8ff}[data-theme=wordtown] .gc-card.s4 .gc-prog i{background:#b77cff}[data-theme=wordtown] .gc-card.s5 .gc-prog i{background:#ffc93c}
+[data-theme=wordtown] .gc-prog em{color:#22304a;text-shadow:0 0 2px #fff;line-height:10px}
+[data-theme=wordtown] .gc-card.pulled{outline-color:#ff6b4a}
+
+/* Gruvbox: warm dark, thin lines, mono labels */
+[data-theme=gruvbox] .ll h3{font-family:"IBM Plex Mono",monospace;color:#fabd2f}
+[data-theme=gruvbox] .ll h3::before{content:"## ";color:#fe8019}
+[data-theme=gruvbox] .ll-card small,[data-theme=gruvbox] .ll-row small{font-family:"IBM Plex Mono",monospace}
+[data-theme=gruvbox] .ll-card .ll-st{background:#3c3836;color:#b8bb26;border:1px solid #504945;font-family:"IBM Plex Mono",monospace}
+[data-theme=gruvbox] .ll-row .ll-r em{color:#b8bb26}
+[data-theme=gruvbox] .ll-bar{background:#3c3836}[data-theme=gruvbox] .ll-bar i{background:#b8bb26}
+[data-theme=gruvbox] .ll-manga{background-color:#1d2021;border:1px solid #665c54;border-radius:4px;background-image:radial-gradient(rgba(235,219,178,.12) 1px,transparent 1.4px)}
+[data-theme=gruvbox] .mg-panel{border:2px solid #ebdbb2;background:#282828;border-radius:2px}
+[data-theme=gruvbox] .mg-panel .cov{filter:grayscale(1) sepia(.35) contrast(1.1) brightness(.85)}
+[data-theme=gruvbox] .mg-bubble{background:#ebdbb2;color:#1d2021;border-color:#1d2021;font-family:"IBM Plex Mono",monospace}
+[data-theme=gruvbox] .mg-fx{color:#fabd2f;-webkit-text-stroke:2px #1d2021}
+[data-theme=gruvbox] .mg-fx.done{color:#fb4934}
+[data-theme=gruvbox] .gc-bar{background:#1d2021;border:1px solid #504945;border-radius:4px;color:#fabd2f;text-shadow:none;font-family:"IBM Plex Mono",monospace}
+[data-theme=gruvbox] .gc-bar b::before{content:"$ ";color:#b8bb26}
+[data-theme=gruvbox] .gc-bar{letter-spacing:0}
+[data-theme=gruvbox] .gc-pull{border:1px solid #fe8019;border-radius:3px;background:#fe8019;color:#1d2021;box-shadow:none;font-family:"IBM Plex Mono",monospace}
+[data-theme=gruvbox] .gc-card{border:1px solid #665c54;border-radius:4px;background:#32302f;color:#ebdbb2}
+[data-theme=gruvbox] .gc-card.s3{border-color:#83a598}[data-theme=gruvbox] .gc-card.s4{border-color:#d3869b;background:#3c3836}
+[data-theme=gruvbox] .gc-card.s5{border-color:#fabd2f;background:#3c3836;box-shadow:0 0 12px rgba(250,189,47,.25)}
+[data-theme=gruvbox] .gc-prog{border-radius:2px;background:#1d2021;border:1px solid #504945}
+[data-theme=gruvbox] .gc-prog i{background:#83a598}[data-theme=gruvbox] .gc-card.s4 .gc-prog i{background:#d3869b}[data-theme=gruvbox] .gc-card.s5 .gc-prog i{background:#fabd2f}
+[data-theme=gruvbox] .gc-prog em{font-family:"IBM Plex Mono",monospace;color:#ebdbb2}
+[data-theme=gruvbox] .gc-card b{font-family:"IBM Plex Mono",monospace;font-weight:500}
+[data-theme=gruvbox] .gc-card.pulled{outline-color:#fe8019}
+[data-theme=gruvbox] .ll-menu{box-shadow:0 10px 28px rgba(0,0,0,.6)}
+
+/* E-reader: black on white, no tone or shine */
+html.eink .ll-grid{background:#fff;border-bottom:3px solid #000}
+html.eink .ll-manga{background:#fff;border:2px solid #000}
+html.eink .mg-panel{border-color:#000}
+html.eink .gc-bar,html.eink .gc-card,html.eink .gc-pull{background:#fff!important;color:#000!important;border:2px solid #000!important}
+html.eink .gc-prog{background:#fff;border:1px solid #000}
+html.eink .gc-prog i,html.eink .gc-card.s5 .gc-prog i{background:#aaa!important}
+[data-theme=eink] .ll-gacha .gc-card .gc-prog em{color:#000!important;background:none!important}
+html.eink .ll-menu{border:2px solid #000}

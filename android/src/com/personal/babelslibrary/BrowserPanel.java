@@ -280,6 +280,24 @@ public class BrowserPanel extends android.content.ContextWrapper {
             address.setHint(searchHint);
             progress.setProgressTintList(android.content.res.ColorStateList.valueOf(0xFFFABD2F));
             progress.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(dark));
+        } else if ("eink".equals(name)) {          // the e-reader theme: black on white, outlines only
+            int black = Color.BLACK, white = Color.WHITE;
+            markOn = black; markOff = 0xFF888888;
+            rootView.setBackgroundColor(white);
+            topLine.setBackgroundColor(white);
+            clock.setTextColor(black);
+            where.setTextColor(0xFF333333);
+            barRow.setBackground(underlined(white, black, 2));
+            for (Button b : btns) {
+                b.setBackground(shape(white, black, 1.5f, 6, false));
+                b.setTextColor(black);
+            }
+            wikiInk = black;
+            address.setBackground(shape(white, black, 1.5f, 6, false));
+            address.setTextColor(black);
+            address.setHintTextColor(0xFF555555);
+            progress.setProgressTintList(android.content.res.ColorStateList.valueOf(black));
+            progress.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(white));
         }
         layoutName = t.optString("layout", "standard");
         swapMode = "swap".equals(t.optString("second", "split"));

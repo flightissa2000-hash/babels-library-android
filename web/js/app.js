@@ -346,8 +346,11 @@ async function checkExpiring() {
 /* Samsung DeX, or a big screen with a mouse (not the iPhone/iPad app): the computer's layout */
 const isDex = () => { try { if (A && A.isDex && A.isDex()) return true; } catch (e) {} return !WEB && innerWidth >= 1000 && matchMedia("(pointer: fine)").matches; };
 addEventListener("resize", () => { const d = isDex(); if (d !== document.documentElement.classList.contains("dex")) { document.documentElement.classList.toggle("dex", d); if (S.tab === "library") render(); } });
+/* the e-reader theme (phone only): black on white with no motion, picked by itself when E-reader mode is switched on */
+if (window.THEMES && !THEMES.eink) THEMES.eink = { name: "E-reader", inspired: "e-ink screens", swatch: ["#ffffff", "#000000", "#777777"],
+  spines: ["#222222", "#555555", "#888888", "#3a3a3a", "#6e6e6e", "#9a9a9a"], reader: { bg: "#ffffff", ink: "#000000", font: "Georgia, serif" }, pageTint: "" };
 function applyTheme() {
-  const k = S.themeChoice !== "auto" ? S.themeChoice : S.theme;
+  const k = S.eink ? "eink" : S.themeChoice !== "auto" ? S.themeChoice : S.theme;
   document.documentElement.dataset.theme = window.THEMES && THEMES[k] ? k : "wordtown";
   if (!NAVS.some((n) => n[0] === S.nav)) S.nav = "folders";
   if (!JSTYLES.some((n) => n[0] === S.jstyle)) S.jstyle = "list";
@@ -1325,13 +1328,12 @@ function renderLibrary(v) {
   const colls = [["", "Everything"], ["wish", "★ Wishlist"], ...(S.colls || []).map((c) => [c.id, c.name])];
   v.innerHTML = `${uploadsHtml()}<button class="btn send-pc" id="sendPc">⬆ Send files to your computer</button>
     <div class="lib-areas">${LIB.areas.map(([k, l]) => `<button data-area="${k}" class="${area === k ? "on" : ""}">${l}</button>`).join("")}</div>
-    ${tabs.length ? `<div class="chips lib-kinds"><button data-kind="all" class="${S.kind === "all" ? "on" : ""}">All</button>${tabs.map(([k, l]) => `<button data-kind="${k}" class="${S.kind === k ? "on" : ""}">${l}</button>`).join("")}</div>` : ""}
+    ${tabs.length || area !== "music" ? `<div class="lib-kindrow">${tabs.length ? `<div class="chips lib-kinds"><button data-kind="all" class="${S.kind === "all" ? "on" : ""}">All</button>${tabs.map(([k, l]) => `<button data-kind="${k}" class="${S.kind === k ? "on" : ""}">${l}</button>`).join("")}</div>` : ""}${area === "music" ? "" : LibLayouts.compass()}</div>` : ""}
     <div class="searchrow"><input id="q" type="search" placeholder="${esc(LIB.placeholder[area])}" value="${esc(S.q)}"></div>
     <div class="lib-ctl">
       <label><span>Group</span><select id="libGroup">${opt(gopts, S.groupBy)}</select></label>
       <label><span>Sort</span><select id="sort">${opt(LIB.sorts, S.sort)}</select></label>
       <label><span>Collection</span><select id="libColl">${opt(colls, S.coll || "")}</select></label>
-      ${area === "music" ? "" : LibLayouts.picker()}
     </div>
     ${area === "music" ? Jukebox.html(groups) : flat.length ? (lay ?? Deck.html(flat, labels)) : `<p class="empty">Nothing here.</p>`}`;
   if (flat.length && area !== "music" && lay == null) Deck.mount(flat.length);
@@ -1484,14 +1486,14 @@ function renderSettings(v) {
       <p class="hint">${WEB ? "Works when this app is on your Home Screen (in Safari: Share → Add to Home Screen, then open it from there). The computer looks every few hours and sends the notification; tap it to share or open the event." : "The computer looks every few hours; the phone checks in about once an hour and needs to reach the computer (home Wi-Fi, or “Reach this library from anywhere”). Each notification has Share and Open."}</p></div>
     ${window.PageKeys ? PageKeys.panel() : ""}
     <div class="panel"><h3>Look</h3>
-      <label class="check"><input type="checkbox" id="einkOn" ${S.eink ? "checked" : ""}> E-reader mode <small class="hint">(for e-ink screens: no animations or shadows, plain black on white)</small></label>
+      <label class="check"><input type="checkbox" id="einkOn" ${S.eink ? "checked" : ""}> E-reader mode <small class="hint">(for e-ink screens: switches to the E-reader theme, with no animations or shadows)</small></label>
       <div class="field"><label for="themeSel">Theme</label><select id="themeSel"><option value="auto">Same as the computer</option>${Object.entries(window.THEMES || {}).map(([k, t]) => `<option value="${k}">${esc(t.name)}</option>`).join("")}</select></div>
       <h4 class="pick-h">Getting around <small>how you switch between Home, Library, Catalogue…</small></h4>
       <div class="pick-grid">${NAVS.map(([k, n, d, zany]) => `<button class="pick ${S.nav === k ? "on" : ""} ${zany ? "zany" : ""}" data-nav-pick="${k}"><i class="pk pk-${k}"></i><b>${n}</b><small>${d}</small></button>`).join("")}</div>
       <h4 class="pick-h">Journal style</h4>
       <div class="pick-grid three">${JSTYLES.map(([k, n, d]) => `<button class="pick ${S.jstyle === k ? "on" : ""}" data-jstyle-pick="${k}"><i class="pk pk-j-${k}"></i><b>${n}</b><small>${d}</small></button>`).join("")}</div></div>
     <p class="hint" style="text-align:center">Babel's Library for ${WEB ? "iPhone & iPad" : "Android"} 1.0${S.ops.length ? ` · ${S.ops.length} change${S.ops.length === 1 ? "" : "s"} waiting to send` : ""}</p>`;
-  if ($("#themeSel")) $("#themeSel").value = S.themeChoice;
+  if ($("#themeSel")) $("#themeSel").value = S.eink ? "eink" : S.themeChoice;
 }
 async function lookForComputer() {
   found = [];
@@ -1899,14 +1901,14 @@ document.addEventListener("change", (e) => {
   if (e.target.id === "libGroup") { S.groupBy = e.target.value; (S.groupByArea ||= {})[S.area] = S.groupBy; saveState(); render(); }
   if (e.target.id === "libColl") { S.coll = e.target.value; saveState(); render(); }
   if (e.target.id === "autoGet") { S.autoGet = e.target.checked; saveState(); }
-  if (e.target.id === "einkOn") { S.eink = e.target.checked; saveState(); applyTheme(); }
+  if (e.target.id === "einkOn") { S.eink = e.target.checked; saveState(); applyTheme(); render(); }
   if (e.target.id === "newsAlerts") {
     const on = e.target.checked;
     // (the phone also switches the computer's watcher on, since that's what finds them)
     if (A && A.setNewsAlerts) A.setNewsAlerts(on);
     toast(on ? "You'll get a notification for new events" : "No more event notifications on this phone");
   }
-  if (e.target.id === "themeSel") { S.themeChoice = e.target.value; saveState(); applyTheme(); render(); }
+  if (e.target.id === "themeSel") { S.eink = e.target.value === "eink"; if (!S.eink) S.themeChoice = e.target.value; saveState(); applyTheme(); render(); }
 });
 document.addEventListener("submit", (e) => {
   if (e.target.id !== "bForm") return;
