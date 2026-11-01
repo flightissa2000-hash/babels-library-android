@@ -229,7 +229,8 @@ const Jukebox = (() => {
     const t = e.target;
     const go = t.closest("[data-jx-playalbum]");
     if (go) { e.stopPropagation(); const a = albumsNow[Number(go.dataset.jxPlayalbum)]; if (a) playList(a.tracks, 0, J.shuffle); return; }
-    const al = t.closest("[data-jx-album]"); if (al) { const a = albumsNow[Number(al.dataset.jxAlbum)]; if (a) openAlbum(a); return; }
+    // (an album strip: the open album's sheet carries data-jx-album too)
+    const al = t.closest(".jx-strip[data-jx-album]"); if (al) { const a = albumsNow[Number(al.dataset.jxAlbum)]; if (a) openAlbum(a); return; }
     if (t.closest("[data-jx-all]")) { const all = albums(Object.values(S.items)).flatMap((a) => a.tracks); return playList(all, -1, true); }
     if (t.closest("[data-jx-open]")) return openNow();
     const a = openAlbum.a;

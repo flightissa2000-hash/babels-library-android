@@ -31,7 +31,7 @@ function store(name, obj) { const t = JSON.stringify(obj); if (A) A.save(name, t
 function saveState() {
   store("state.json", { conn: S.conn, since: S.since, lastSync: S.lastSync, theme: S.theme, themeChoice: S.themeChoice, autoGet: S.autoGet, downloads: S.downloads,
     readMode: S.readMode, search: S.search, nav: S.nav, eink: S.eink, jstyle: S.jstyle, tabsOff: S.tabsOff, blayout: S.blayout, bsecond: S.bsecond, bhome: S.bhome,
-    area: S.area, kind: S.kind, groupBy: S.groupBy, groupByArea: S.groupByArea, sort: S.sort, coll: S.coll });
+    area: S.area, kind: S.kind, libLayout: S.libLayout, groupBy: S.groupBy, groupByArea: S.groupByArea, sort: S.sort, coll: S.coll });
 }
 /* ---------------------------------------------------------------- profiles
    The computer keeps the profiles (everyone who uses the library): the phone is logged in as one of them and sees its
@@ -343,12 +343,16 @@ async function checkExpiring() {
 }
 
 /* ---------------------------------------------------------------- theme */
+/* Samsung DeX, or a big screen with a mouse (not the iPhone/iPad app): the computer's layout */
+const isDex = () => { try { if (A && A.isDex && A.isDex()) return true; } catch (e) {} return !WEB && innerWidth >= 1000 && matchMedia("(pointer: fine)").matches; };
+addEventListener("resize", () => { const d = isDex(); if (d !== document.documentElement.classList.contains("dex")) { document.documentElement.classList.toggle("dex", d); if (S.tab === "library") render(); } });
 function applyTheme() {
   const k = S.themeChoice !== "auto" ? S.themeChoice : S.theme;
   document.documentElement.dataset.theme = window.THEMES && THEMES[k] ? k : "wordtown";
   if (!NAVS.some((n) => n[0] === S.nav)) S.nav = "folders";
   if (!JSTYLES.some((n) => n[0] === S.jstyle)) S.jstyle = "list";
   document.documentElement.dataset.nav = S.nav;
+  document.documentElement.classList.toggle("dex", isDex());
   document.documentElement.dataset.jstyle = S.jstyle;
   if (!BLAYOUTS.some((b) => b[0] === S.blayout)) S.blayout = "standard";
   document.documentElement.classList.toggle("tabs-off", !!S.tabsOff);
@@ -1316,6 +1320,7 @@ function renderLibrary(v) {
     }
   }
   Deck.stacks = stacks;      // (read by the deck's cards)
+  const lay = area === "music" || !flat.length ? null : LibLayouts.html(flat, labels, stacks);      // (null: the fan deck)
   const opt = (list, cur) => list.map(([k, l]) => `<option value="${esc(k)}" ${String(cur) === String(k) ? "selected" : ""}>${esc(l)}</option>`).join("");
   const colls = [["", "Everything"], ["wish", "★ Wishlist"], ...(S.colls || []).map((c) => [c.id, c.name])];
   v.innerHTML = `${uploadsHtml()}<button class="btn send-pc" id="sendPc">⬆ Send files to your computer</button>
@@ -1326,9 +1331,10 @@ function renderLibrary(v) {
       <label><span>Group</span><select id="libGroup">${opt(gopts, S.groupBy)}</select></label>
       <label><span>Sort</span><select id="sort">${opt(LIB.sorts, S.sort)}</select></label>
       <label><span>Collection</span><select id="libColl">${opt(colls, S.coll || "")}</select></label>
+      ${area === "music" ? "" : LibLayouts.picker()}
     </div>
-    ${area === "music" ? Jukebox.html(groups) : flat.length ? Deck.html(flat, labels) : `<p class="empty">Nothing here.</p>`}`;
-  if (flat.length && area !== "music") Deck.mount(flat.length);
+    ${area === "music" ? Jukebox.html(groups) : flat.length ? (lay ?? Deck.html(flat, labels)) : `<p class="empty">Nothing here.</p>`}`;
+  if (flat.length && area !== "music" && lay == null) Deck.mount(flat.length);
 }
 function renderPhone(v, items) {
   refreshFiles();
@@ -1363,6 +1369,26 @@ async function uploadPrivacy() {
 window.Native = window.Native || {};
 // (files shared into the app from another app: the phone asks the same question, then they go)
 window.Native.askUploadPrivacy = () => uploadPrivacy().then((p) => A.sharedPrivacy(p == null ? "cancel" : p ? "private" : "public"));
+/* files already on the phone: looked through for ones in the library (Android: a folder; iPhone: picked files) */
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-scan]");
+  if (!b) return;
+  if (!S.conn.token) return toast("Pair with your computer first (Settings).");
+  const st = $("#scanState"); if (st) st.textContent = "Starting…";
+  if (b.dataset.scan === "pick" && A.scanPick) return A.scanPick();
+  A.scanFolder(b.dataset.scan === "new");
+});
+Object.assign(window.Native, {
+  scanProgress(what, n, of) { const st = $("#scanState"); if (st) st.textContent = of ? `${what} (${n} of ${of})` : what; },
+  scanDone(r) {
+    const st = $("#scanState");
+    if (r.cancelled) { if (st) st.textContent = ""; return; }
+    refreshFiles(); saveLibrary(true);
+    const msg = r.error ? r.error : !r.found ? "None of those files are in your library." : `${r.found} found in your library: ${r.added} added${r.had ? `, ${r.had} already here` : ""}.`;
+    if (st) st.textContent = msg;
+    toast(msg); render();
+  },
+});
 function uploadList() { try { return JSON.parse(A ? A.uploads() : "[]"); } catch (e) { return []; } }
 function uploadsHtml() {
   const list = uploadList();
@@ -1446,7 +1472,11 @@ function renderSettings(v) {
       ${Prof.server ? `<button class="btn" data-prof-pin>🔑 ${Prof.me().locked ? `Change or remove ${esc(Prof.me().name)}'s PIN` : `Give ${esc(Prof.me().name)} a PIN`}</button>` : ""}
       <form class="prof-add" id="profAdd"><input id="profNew" maxlength="24" placeholder="A name" autocomplete="off"><button class="btn">＋ Add a profile</button></form></div>
     <div class="panel"><h3>Files on this phone</h3><p class="hint">${Object.keys(S.files).length} files · ${A ? fmtSize(A.freeSpace()) : "?"} free</p>
-      <button class="btn" id="myFiles">See what's on the phone</button></div>
+      <div class="btns"><button class="btn" id="myFiles">See what's on the phone</button></div>
+      ${A && A.scanFolder ? `<p class="hint">Already have books, comics, music or films from your library on this ${WEB ? "device (in Files)" : "phone (in Downloads, say)"}? ${WEB ? "Pick them" : "Pick the folder"} and the ones that are in your library are added here, without downloading them again. ${WEB ? "" : "The originals stay where they are."}</p>
+        <div class="btns">${WEB ? `<button class="btn" data-scan="new">🔍 Find my files on this device</button>` : `<button class="btn" data-scan="pick">🔍 Pick files…</button><button class="btn" data-scan="new">📁 Look through a folder…</button>${A.scanFolderKnown && A.scanFolderKnown() ? `<button class="btn" data-scan="again">↻ Look again</button>` : ""}`}</div>
+        ${WEB ? "" : `<p class="hint">Android doesn't let apps look through all of Downloads: pick the files there (hold one to choose several), or a folder inside it.</p>`}
+        <p class="hint" id="scanState"></p>` : ""}</div>
     <div class="panel"><h3>Files</h3>
       <label class="check"><input type="checkbox" id="autoGet" ${S.autoGet ? "checked" : ""}> Fetch files sent from the computer by itself (Wi-Fi or mobile data)</label></div>
     <div class="panel"><h3>News</h3>
@@ -1783,7 +1813,7 @@ const Deck = (() => {
     sh.scrollTop = 0;
   }
   addEventListener("resize", queue);
-  const self = { html, mount, STEP, stacks: {} };
+  const self = { html, mount, STEP, stacks: {}, openSeries };
   return self;
 })();
 function closeSheet() { $("#sheet").hidden = true; Journal.close(); render(); }

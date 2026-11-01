@@ -225,6 +225,46 @@
     cancelUpload(id) { const u = ups.find((x) => x.id === id); if (u) { u.state = "cancelled"; Net.call("DELETE", "/sync/upload?u=" + id, null); } },
     dismissUpload(id) { const i = ups.findIndex((x) => x.id === id); if (i >= 0) ups.splice(i, 1); },
     retryUpload(id) { const u = ups.find((x) => x.id === id); if (u) { u.state = "waiting"; u.msg = ""; runUploads(); } },
+    // files already on this iPhone/iPad (in Files): pick them, and each one that's in the library is kept in the app
+    scanFolderKnown: () => false,
+    scanFolder() {
+      const inp = document.createElement("input");
+      inp.type = "file"; inp.multiple = true;
+      inp.onchange = async () => {
+        const list = [...inp.files];
+        const tell = (fn, ...a) => window.Native && Native[fn] && Native[fn](...a);
+        let found = 0, added = 0, had = 0, error = "";
+        try {
+          const r = await Net.call("POST", "/sync/match", JSON.stringify({ files: list.map((f, i) => ({ k: String(i), size: f.size })) }), 60000, { "Content-Type": "application/json" });
+          const maybe = r.status === 200 ? await r.res.json() : null;
+          if (!maybe) throw new Error(r.status ? `The computer said no (${r.status}).` : "Can't reach your computer right now.");
+          const q2 = [];
+          let n = 0;
+          for (const k of Object.keys(maybe)) {
+            const f = list[Number(k)];
+            tell("scanProgress", "Checking " + f.name, ++n, Object.keys(maybe).length);
+            if (f.size > 600e6) continue;          // (too big to read whole on a phone's browser)
+            const h = await crypto.subtle.digest("SHA-256", await f.arrayBuffer());
+            q2.push({ k, size: f.size, sha: [...new Uint8Array(h)].map((x) => x.toString(16).padStart(2, "0")).join("") });
+          }
+          const r2 = q2.length ? await Net.call("POST", "/sync/match", JSON.stringify({ files: q2 }), 60000, { "Content-Type": "application/json" }) : null;
+          const hits = r2 && r2.status === 200 ? await r2.res.json() : {};
+          for (const [k, h] of Object.entries(hits)) {
+            const f = list[Number(k)], name = `${h.id}.${String(h.file_type || "bin").toLowerCase()}`;
+            found++;
+            if (files[name] === f.size) { had++; continue; }
+            tell("scanProgress", "Adding " + f.name, added + 1, Object.keys(hits).length);
+            let k2 = 0;
+            for (let i = 0; i < f.size || k2 === 0; i += PIECE, k2++) await DB.putPiece(name + "#" + k2, f.slice(i, i + PIECE));
+            await DB.put("files", name, { name, size: f.size, type: f.type || mimeOf(name), pieces: k2, done: true });
+            files[name] = f.size; added++;
+          }
+          estimate();
+        } catch (e) { error = e.message || "Couldn't check those files."; }
+        tell("scanDone", { found, added, had, error });
+      };
+      inp.click();
+    },
     pickFiles(priv) {
       const inp = document.createElement("input");
       inp.type = "file"; inp.multiple = true;

@@ -286,7 +286,7 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ sending files to the computer
 
-    private static final int REQ_PICK = 7, REQ_PASSWORDS = 8;
+    private static final int REQ_PICK = 7, REQ_PASSWORDS = 8, REQ_SCAN = 9, REQ_SCANFILES = 10;
     /** Android 13+: ask once to show notifications (the upload progress and its Cancel button live there). */
     private void askToNotify() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
@@ -338,6 +338,33 @@ public class MainActivity extends Activity {
                 }
                 js("window.Native && Native.pwImported && Native.pwImported(" + msg + ")");
             });
+            return;
+        }
+        if (req == REQ_SCANFILES) {             // files picked (in Downloads, say: Android won't hand over all of Downloads)
+            if (res != RESULT_OK || data == null) { js("window.Native && Native.scanDone && Native.scanDone({cancelled:true})"); return; }
+            List<Uri> picked = new ArrayList<>();
+            if (data.getClipData() != null) for (int k = 0; k < data.getClipData().getItemCount(); k++) picked.add(data.getClipData().getItemAt(k).getUri());
+            else if (data.getData() != null) picked.add(data.getData());
+            pool.execute(() -> {
+                List<String[]> files = new ArrayList<>();
+                for (Uri u : picked) {
+                    try (Cursor k = getContentResolver().query(u, null, null, null, null)) {
+                        if (k != null && k.moveToFirst()) {
+                            int ni = k.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME), si = k.getColumnIndex(android.provider.OpenableColumns.SIZE);
+                            files.add(new String[]{u.toString(), ni >= 0 ? k.getString(ni) : "file", si >= 0 ? String.valueOf(k.getLong(si)) : "0"});
+                        }
+                    } catch (Exception ignored) { }
+                }
+                scanFiles(files);
+            });
+            return;
+        }
+        if (req == REQ_SCAN) {
+            if (res != RESULT_OK || data == null || data.getData() == null) { js("window.Native && Native.scanDone && Native.scanDone({cancelled:true})"); return; }
+            Uri tree = data.getData();
+            try { getContentResolver().takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) { }
+            getSharedPreferences("scan", MODE_PRIVATE).edit().putString("tree", tree.toString()).apply();
+            pool.execute(() -> scanTree(tree));
             return;
         }
         if (req != REQ_PICK || res != RESULT_OK || data == null) return;
@@ -750,6 +777,101 @@ public class MainActivity extends Activity {
         });
     }
 
+    /* ---- files already on the phone: a folder you pick (Downloads, say) is looked through for files that are in the
+       computer's library (same size, then the same SHA-256); each one found is copied into the app as that item, so it
+       opens without downloading it again. The originals stay where they are. */
+    private static final java.util.Set<String> SCAN_EXT = new java.util.HashSet<>(java.util.Arrays.asList(
+            "pdf", "epub", "cbz", "cbr", "cb7", "cbt", "mp3", "flac", "m4a", "aac", "ogg", "oga", "opus", "wav", "wma", "aif", "aiff",
+            "mp4", "m4v", "mkv", "webm", "avi", "mov", "wmv", "mpg", "mpeg", "ts"));
+
+    private void walk(Uri tree, String docId, List<String[]> out, int depth) {
+        if (depth > 12 || out.size() > 5000) return;
+        Uri kids = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId);
+        String[] cols = {android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID, android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE, android.provider.DocumentsContract.Document.COLUMN_SIZE};
+        try (Cursor c = getContentResolver().query(kids, cols, null, null, null)) {
+            while (c != null && c.moveToNext()) {
+                String id = c.getString(0), name = c.getString(1), mime = c.getString(2);
+                if (android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) { walk(tree, id, out, depth + 1); continue; }
+                int dot = name == null ? -1 : name.lastIndexOf('.');
+                if (dot < 0 || !SCAN_EXT.contains(name.substring(dot + 1).toLowerCase())) continue;
+                out.add(new String[]{android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, id).toString(), name, String.valueOf(c.getLong(3))});
+            }
+        } catch (Exception ignored) { }
+    }
+
+    private void scanProgress(String what, int done, int total) {
+        js("window.Native && Native.scanProgress && Native.scanProgress(" + JSONObject.quote(what) + "," + done + "," + total + ")");
+    }
+
+    private void scanTree(Uri tree) {
+        List<String[]> files = new ArrayList<>();
+        scanProgress("Looking through the folder…", 0, 0);
+        walk(tree, android.provider.DocumentsContract.getTreeDocumentId(tree), files, 0);
+        scanFiles(files);
+    }
+
+    /** files: [uri, name, size] each */
+    private void scanFiles(List<String[]> files) {
+        int found = 0, added = 0, had = 0;
+        String err = "";
+        try {
+            // 1: sizes (cheap) — which could be in the library?
+            JSONArray q = new JSONArray();
+            for (int i = 0; i < files.size(); i++) q.put(new JSONObject().put("k", String.valueOf(i)).put("size", Long.parseLong(files.get(i)[2])));
+            Net.Res r = Net.call("POST", "/sync/match", new JSONObject().put("files", q).toString());
+            if (r.status != 200) throw new IOException(r.status == 0 ? "Can't reach your computer right now." : "The computer said no (" + r.status + ").");
+            JSONObject maybe = new JSONObject(new String(r.body, StandardCharsets.UTF_8));
+            // 2: the SHA-256 of each that could be (reading the whole file), then the computer says which item it is
+            JSONArray q2 = new JSONArray();
+            int n = 0, of = maybe.length();
+            for (java.util.Iterator<String> it = maybe.keys(); it.hasNext(); ) {
+                String k = it.next();
+                String[] f = files.get(Integer.parseInt(k));
+                scanProgress("Checking " + f[1], ++n, of);
+                try (InputStream in = getContentResolver().openInputStream(Uri.parse(f[0]))) {
+                    java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+                    byte[] b = new byte[1 << 16];
+                    int k2;
+                    while ((k2 = in.read(b)) > 0) md.update(b, 0, k2);
+                    StringBuilder hex = new StringBuilder();
+                    for (byte x : md.digest()) hex.append(String.format("%02x", x));
+                    q2.put(new JSONObject().put("k", k).put("size", Long.parseLong(f[2])).put("sha", hex.toString()));
+                } catch (Exception ignored) { }
+            }
+            JSONObject hits = new JSONObject();
+            if (q2.length() > 0) {
+                Net.Res r2 = Net.call("POST", "/sync/match", new JSONObject().put("files", q2).toString());
+                if (r2.status == 200) hits = new JSONObject(new String(r2.body, StandardCharsets.UTF_8));
+            }
+            // 3: each one found goes into the app under its item's name
+            File dir = libraryDir(this);
+            n = 0; of = hits.length();
+            for (java.util.Iterator<String> it = hits.keys(); it.hasNext(); ) {
+                String k = it.next();
+                JSONObject h = hits.getJSONObject(k);
+                String[] f = files.get(Integer.parseInt(k));
+                found++;
+                String name = h.getInt("id") + "." + h.optString("file_type", "bin").toLowerCase();
+                File dest = new File(dir, name);
+                if (dest.isFile() && dest.length() == Long.parseLong(f[2])) { had++; continue; }
+                scanProgress("Adding " + f[1], ++n, of);
+                File part = new File(dir, name + ".part");
+                try (InputStream in = getContentResolver().openInputStream(Uri.parse(f[0])); FileOutputStream out = new FileOutputStream(part)) {
+                    byte[] b = new byte[1 << 16];
+                    int k2;
+                    while ((k2 = in.read(b)) > 0) out.write(b, 0, k2);
+                }
+                if (part.renameTo(dest)) added++; else part.delete();
+            }
+        } catch (Exception e) {
+            err = e.getMessage() == null ? "Couldn't look through that folder." : e.getMessage();
+        }
+        try {
+            js("window.Native && Native.scanDone && Native.scanDone(" + new JSONObject().put("found", found).put("added", added).put("had", had).put("error", err) + ")");
+        } catch (Exception ignored) { }
+    }
+
     private void js(final String code) {
         if (web != null) runOnUiThread(() -> web.evaluateJavascript(code, null));
     }
@@ -966,6 +1088,41 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void retryUpload(String id) { UploadService.retry(MainActivity.this, id); }
+
+        /** Look through a folder on the phone for files that are already in the library (the last one, or pick one). */
+        @JavascriptInterface
+        public void scanFolder(boolean pickNew) {
+            String last = getSharedPreferences("scan", MODE_PRIVATE).getString("tree", "");
+            if (!pickNew && !last.isEmpty()) {
+                boolean ok = false;
+                for (android.content.UriPermission p : getContentResolver().getPersistedUriPermissions()) if (p.getUri().toString().equals(last) && p.isReadPermission()) ok = true;
+                if (ok) { pool.execute(() -> scanTree(Uri.parse(last))); return; }
+            }
+            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            runOnUiThread(() -> startActivityForResult(i, REQ_SCAN));
+        }
+
+        /** Samsung DeX (the phone on a monitor, as a desktop): the app takes the computer's layout. */
+        @JavascriptInterface
+        public boolean isDex() {
+            try {
+                android.content.res.Configuration c = getResources().getConfiguration();
+                Class<?> k = c.getClass();
+                return k.getField("SEM_DESKTOP_MODE_ENABLED").getInt(k) == k.getField("semDesktopModeEnabled").getInt(c);
+            } catch (Exception e) { return false; }
+        }
+
+        @JavascriptInterface
+        public void scanPick() {
+            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("*/*");
+            i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            runOnUiThread(() -> startActivityForResult(i, REQ_SCANFILES));
+        }
+
+        @JavascriptInterface
+        public boolean scanFolderKnown() { return !getSharedPreferences("scan", MODE_PRIVATE).getString("tree", "").isEmpty(); }
 
         /** Choose files on the phone to add to the computer's library. */
         /** The answer for files shared in from another app: "public", "private" or "cancel". */

@@ -550,10 +550,14 @@ Object.assign(window.Reader, (() => {
     const data = await (await fetch(R.url)).arrayBuffer();
     const book = ePub(data);
     R.book = book;
+    // Safari (iPhone, iPad) gives the page no taps, swipes or selections inside a book whose frame may not run scripts:
+    // there the frame may, and the book's own scripts are taken out before it's shown
+    const scripted = typeof WEB !== "undefined" && WEB;
+    if (scripted) book.spine.hooks.serialize.register((output, section) => { section.output = String(output).replace(/<script[\s\S]*?<\/script\s*>/gi, "").replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*')/gi, ""); });
     // scrolling: each chapter is one long page, and swiping on past its end brings the next one;
     // pages: one screen (or two side by side) at a time
-    const rend = book.renderTo(box, scrolling ? { width: "100%", height: "100%", flow: "scrolled-doc", allowScriptedContent: false, ignoreClass: "ink-pin" }
-      : { width: "100%", height: "100%", flow: "paginated", spread: m === "double" ? "always" : "none", minSpreadWidth: 0, allowScriptedContent: false, ignoreClass: "ink-pin" });
+    const rend = book.renderTo(box, scrolling ? { width: "100%", height: "100%", flow: "scrolled-doc", allowScriptedContent: scripted, ignoreClass: "ink-pin" }
+      : { width: "100%", height: "100%", flow: "paginated", spread: m === "double" ? "always" : "none", minSpreadWidth: 0, allowScriptedContent: scripted, ignoreClass: "ink-pin" });
     R.rend = rend;
     rend.themes.default({ body: { background: th.bg + " !important", color: th.ink + " !important", "font-family": th.font, "line-height": "1.6", padding: "0 6px !important" },
       // the book's own colours would fight the theme (dark text on a dark page): the theme's ink wins everywhere
@@ -678,18 +682,30 @@ Object.assign(window.Reader, (() => {
     }
     const step = (side, swipe) => { pauseFollow(); return dirOf(side, swipe) > 0 ? rend.next() : rend.prev(); };
     R.step = (d) => (d > 0 ? rend.next() : rend.prev());
-    let x0 = null;
-    rend.on("touchstart", (e) => { x0 = e.changedTouches[0].screenX; });
+    let x0 = null, y0 = 0, t0 = 0, tapped = 0;
+    // a tap at the edges turns the page, in the middle shows the bars (a tap is handled on touchend: Safari doesn't
+    // always send the book's frame a click)
+    const tapAt = (clientX, view) => {
+      if (R.pinMode || String(view?.getSelection?.() || "").trim()) return;
+      const w = box.clientWidth, x = ((clientX % w) + w) % w;
+      if (x < w * 0.3) step("left"); else if (x > w * 0.7) step("right"); else bar();
+    };
+    rend.on("touchstart", (e) => { x0 = e.changedTouches[0].screenX; y0 = e.changedTouches[0].screenY; t0 = Date.now(); });
     rend.on("touchend", (e) => {
       if (x0 == null) return;
-      const dx = e.changedTouches[0].screenX - x0;
+      const c = e.changedTouches[0], dx = c.screenX - x0, dy = c.screenY - y0;
       x0 = null;
-      if (Math.abs(dx) > 50 && !String(e.view?.getSelection?.() || "").trim()) step(dx < 0 ? "right" : "left", true);
+      if (Math.abs(dx) > 50 && !String(e.view?.getSelection?.() || "").trim()) return step(dx < 0 ? "right" : "left", true);
+      if (Math.abs(dx) < 12 && Math.abs(dy) < 12 && Date.now() - t0 < 400 && !e.target.closest?.("a,.ink-pin")) {
+        // (a picture: the edges still turn the page; its middle is left to its own tap, which shows it big)
+        const w = box.clientWidth, x = ((c.clientX % w) + w) % w;
+        if (e.target.closest?.("img,image") && x >= w * 0.3 && x <= w * 0.7) return;
+        tapped = Date.now(); tapAt(c.clientX, e.view);
+      }
     });
     rend.on("click", (e) => {
-      if (R.pinMode || (window.getSelection && String(e.view.getSelection()).trim())) return;
-      const w = box.clientWidth, x = ((e.clientX % w) + w) % w;
-      if (x < w * 0.3) step("left"); else if (x > w * 0.7) step("right"); else bar();
+      if (Date.now() - tapped < 700) return;          // (already handled as a tap)
+      tapAt(e.clientX, e.view);
     });
     // percentages need the book's locations, worked out in the background
     book.ready.then(() => book.locations.generate(1200)).then(() => { if (R && rend.location) rend.emit("relocated", rend.location); }).catch(() => {});
