@@ -282,6 +282,11 @@ public class MainActivity extends Activity {
         String url = i.getStringExtra(BrowserPanel.EXTRA_URL);
         if (url != null && !url.isEmpty()) openBrowserNow(url);
         else if (i.getBooleanExtra("browser", false)) js("window.setTab && setTab('browser')");
+        // from the home-screen widget: the item it shows, or the Bulletin
+        int open = i.getIntExtra(BabelWidget.EXTRA_OPEN, 0);
+        String tab = i.getStringExtra(BabelWidget.EXTRA_TAB);
+        if (open > 0) js("window.Widget && Widget.open(" + open + ")");
+        else if (tab != null) js("window.Widget && Widget.tab(" + org.json.JSONObject.quote(tab) + ")");
     }
 
     // ------------------------------------------------------------------ sending files to the computer
@@ -915,6 +920,19 @@ public class MainActivity extends Activity {
                 return false;
             }
             return tmp.renameTo(f);
+        }
+
+        /** what the home-screen widget shows (see BabelWidget); its cover is fetched first if the app hasn't yet */
+        @JavascriptInterface
+        public void setWidget(final String json) {
+            if (!save("widget.json", json)) return;
+            new Thread(() -> {
+                try {
+                    org.json.JSONObject it = new org.json.JSONObject(json).optJSONObject("item");
+                    if (it != null && it.optBoolean("has_cover")) cover(String.valueOf(it.optInt("id")), it.optString("cover_v", "0"));
+                } catch (Exception ignored) { }
+                BabelWidget.refresh(MainActivity.this);
+            }).start();
         }
 
         private File stateFile(String name) {

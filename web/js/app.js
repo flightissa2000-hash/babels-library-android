@@ -782,6 +782,7 @@ function setTab(t) {
   $("#view").scrollTop = 0;
 }
 function render() {
+  if (window.Widget) Widget.update();       // (the home-screen widget, when what it shows changed)
   const v = $("#view");
   const items = Object.values(S.items);
   if (!S.conn.token && S.tab !== "settings") {
@@ -1209,7 +1210,52 @@ const Bulletin = (() => {
     if (w && picks) { e.stopPropagation(); return Catalogue.want(picks[Number(w.dataset.btWant)], w); }
     const fd = t.closest("[data-bt-find]"); if (fd && picks) return Catalogue.show(picks[Number(fd.dataset.btFind)]);
   }, true);
-  return { html, after, fromServer, reset: () => { picks = null; } };
+  return { html, after, fromServer, done, file, reset: () => { picks = null; } };
+})();
+/* The home-screen widget (Android): the thing you opened last and this week's challenge, in the theme's colours.
+   Told again whenever the page redraws, but only when something it shows has changed. */
+window.Widget = (() => {
+  let last = "", timer = null;
+  const hex = (v) => {            // the native side reads #rrggbb
+    const m = String(v).match(/\d+(\.\d+)?/g);
+    if (/^#[0-9a-f]{6}$/i.test(v.trim())) return v.trim();
+    if (/^#[0-9a-f]{3}$/i.test(v.trim())) return "#" + [...v.trim().slice(1)].map((c) => c + c).join("");
+    return m && m.length >= 3 ? "#" + m.slice(0, 3).map((n) => Math.round(+n).toString(16).padStart(2, "0")).join("") : "";
+  };
+  function data() {
+    const cs = getComputedStyle(document.documentElement), c = (v) => hex(cs.getPropertyValue(v));
+    const theme = { bg: c("--bg"), surface: c("--surface"), ink: c("--ink"), soft: c("--ink-soft"), accent: c("--accent") };
+    const it = Object.values(S.items).filter((i) => i.opened_at && i.kind !== "music").sort((a, b) => b.opened_at - a.opened_at)[0];
+    let item = null;
+    if (it) {
+      const p = pct(it), st = W.status(it)[0];
+      item = { id: it.id, title: W.title(it).trim(), by: byline(it), pct: p, has_cover: !!it.has_cover, cover_v: String(it.cover_v || 0), color: colorFor(it),
+        label: st === "done" ? "FINISHED" : `CONTINUE ${isVideo(it) ? "WATCHING" : "READING"}`,
+        note: it.watched ? "Finished" : p ? `${p}% · ${ago(it.opened_at)}` : `Opened ${ago(it.opened_at)}` };
+    }
+    const ch = load(Bulletin.file(), null), ci = ch && S.items[ch.id];
+    const challenge = ci ? { id: ci.id, text: (Bulletin.done(ch, ci) ? "✓ Challenge complete: " : `This week: ${ch.type === "finish" ? "finish" : ch.type === "start" ? "start" : "revisit"} `) + W.title(ci) } : null;
+    return { theme, item, challenge };
+  }
+  function update() {
+    if (!A || !A.setWidget) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      let d; try { d = JSON.stringify(data()); } catch (e) { return; }
+      if (d !== last) { last = d; A.setWidget(d); }
+    }, 800);
+  }
+  // a tap on the widget: open the thing (on the phone: the reader; otherwise its card), or the Bulletin
+  function open(id) {
+    const it = S.items[id];
+    if (!it) return setTab("home");
+    if (onPhone(it)) Reader.start(it); else openSheet(it.id);
+  }
+  function tab(t) {
+    if (t === "bulletin") { W.tab = "bulletin"; store("hometab.json", W.tab); }
+    setTab("home");
+  }
+  return { update, open, tab, data };
 })();
 
 /* ---- the library's filters, exactly as on the computer: a section (Books, Articles, Music, TV & Movies), its kinds

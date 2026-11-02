@@ -79,6 +79,18 @@
             android:name=".NewsAlerts"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+        <!-- the home-screen widget: what you're reading now and this week's challenge -->
+        <receiver
+            android:name=".BabelWidget"
+            android:exported="true"
+            android:label="Babel's Library">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info" />
+        </receiver>
         <!-- hands a downloaded file to another app (video player, comic reader) for formats this app can't show -->
         <provider
             android:name=".FilesProvider"
