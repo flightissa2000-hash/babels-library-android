@@ -43,6 +43,11 @@ Object.assign(window.Reader, (() => {
   /* where you are: kept on the item at once, sent to the computer every few seconds and when you close */
   function save(loc, progress) {
     if (!R) return;
+    // the page it already knew (the book landing where it was opened, or drawn again on waking): nothing new to send,
+    // or an old place would go out as the newest and win over where another device has read to since
+    const known = (S.items[R.it.id] || R.it).last_location;
+    if (!R.pending && String(loc) === String(known ?? "")) return paintMark();
+    if (!R.pending && Date.now() - R.at < 2500) { Object.assign(R.it, { last_location: String(loc) }); return paintMark(); }
     R.pending = { last_location: String(loc), progress: Math.max(0, Math.min(1, progress || 0)) };
     Object.assign(R.it, R.pending);
     if (!R.saveT) R.saveT = setTimeout(saveNow, 5000);
@@ -51,17 +56,33 @@ Object.assign(window.Reader, (() => {
   function saveNow() {
     if (!R) return;
     clearTimeout(R.saveT); R.saveT = null;
-    if (R.pending) { change(R.it.id, { ...R.pending, opened_at: now() }); R.pending = null; }
+    if (R.pending) { change(R.it.id, { ...R.pending, opened_at: now() }); R.pending = null; R.sent = now(); }
+  }
+  /* a sync brought a newer place for the open book (read further on another device while this one slept): go there,
+     rather than carry on from the old page and send that back as the newest */
+  function follow(skew) {
+    if (!R || R.pending || !Prof.isMain() || !["pdf", "epub", "comic", "video", "audio"].includes(R.kind)) return;
+    const fresh = S.items[R.it.id];
+    if (!fresh || !fresh.last_location || String(fresh.last_location) === String(R.it.last_location ?? "")) return;
+    const theirs = (fresh.clock || {}).last_location || 0;          // (the computer's clock; ours is shifted by skew)
+    if (theirs <= (R.sent || R.opened) + skew) return;
+    toast("Picked up where you left off on your other device");
+    start(fresh);
   }
 
   async function start(it) {
     if (!it) return;
     if (it.kind === "music" && window.Jukebox) return Jukebox.playItem(it);       // songs play in the jukebox (it keeps going)
     if (!onPhone(it)) return toast("Get the file from your computer first.");
+    // not synced lately (this device slept, or was off): ask the computer for the latest place first (a few seconds at most)
+    if (!R && S.conn.token && now() - (S.lastSync || 0) > 20) {
+      await Promise.race([sync(), new Promise((ok) => setTimeout(ok, 3000))]);
+      it = S.items[it.id] || it;
+    }
     if (R) close(true);
     const name = fileName(it), url = "/local/" + encodeURIComponent(name), ext = (it.file_type || "").toLowerCase();
     const kind = ext === "pdf" ? "pdf" : ext === "epub" ? "epub" : COMIC.test(ext) ? "comic" : VIDEO.test(ext) ? "video" : AUDIO.test(ext) ? "audio" : "other";
-    R = { it, name, url, ext, kind, active: null, pinMode: false };
+    R = { it, name, url, ext, kind, active: null, pinMode: false, at: Date.now(), opened: now() };
     window.Reader.open = true;
     document.documentElement.classList.add("reading");        // (the music bar shrinks to a little record in the corner)
     if (A) A.keepAwake(true);
@@ -1251,7 +1272,7 @@ Object.assign(window.Reader, (() => {
   }
 
   return {
-    start, close, saveNow, pageKey, lookUp,
+    start, close, saveNow, follow, pageKey, lookUp,
     // the computer gave a note its own number: carry on showing it as the same note
     renamed(from, to) { if (R && R.active === from) R.active = to; if (R && !$("#rSheet")?.hidden) redraw(); },
     get busy() { return !!(R && (!$("#rSheet")?.hidden || !$("#rLight")?.hidden)); },

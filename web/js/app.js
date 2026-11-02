@@ -517,20 +517,25 @@ function sync(force) {
   syncP = (async () => {
     try {
       let made = {};
+      let since = force ? 0 : S.since;
       if (S.ops.length || S.jops.length || Ann.queue.length) {
         const sending = S.ops.slice(), jsending = S.jops.slice(), asending = Ann.flying = Ann.queue.slice();
         let r;
         try { r = await api("POST", "/sync/push", { ops: sending, jops: jsending, aops: asending, now: now() }); } finally { Ann.flying = []; }
         made = r.made || {};
+        // some of ours were older than the computer's (made before this device last heard from it): fetch its newer
+        // ones back, or this device would keep showing its old place
+        if (r.kept_ours && sending.length && r.now) since = Math.min(since, Math.min(...sending.map((o) => o.ts)) + (r.now - now()) - 5);
         S.ops = S.ops.filter((o) => !sending.includes(o));
         S.jops = S.jops.filter((o) => !jsending.includes(o));
         Ann.queue = Ann.queue.filter((o) => !asending.includes(o));
         Ann.made(r.made_anns);
         saveOps();
       }
-      const d = await api("GET", `/sync/pull?since=${force ? 0 : S.since}`);
+      const d = await api("GET", `/sync/pull?since=${since}`);
       await Online.flush();             // (wishes, saved stories and the News's place, made while the computer was off)
       merge(d, made);
+      if (Reader.open && Reader.follow) Reader.follow(S.skew || 0);
       // the browser's ad and tracker lists come from the computer too, refreshed weekly
       if (A && A.updateAdblock && now() - A.adblockAge() > 7 * 86400) bridge("updateAdblock");
       S.syncError = "";
@@ -551,6 +556,7 @@ function sync(force) {
   return syncP;
 }
 function merge(d, made = {}) {
+  const skew = S.skew = d.now ? d.now - now() : 0;        // (the computer's clock minus ours)
   if (d.full) { S.items = {}; S.anns = {}; S.journal = {}; }
   // journal rows and entries made here and now saved on the computer: drop the phone's temporary copies
   // (the computer's come in below); ones not sent yet stay
@@ -567,8 +573,8 @@ function merge(d, made = {}) {
   }
   for (const it of d.items || []) {
     const mine = S.items[it.id];
-    // keep anything changed here after the computer's copy (sent on the next sync)
-    if (mine) for (const op of S.ops.filter((o) => o.id === it.id)) it[op.field] = op.value;
+    // keep anything changed here after the computer's copy (sent on the next sync); not an older one it already has
+    if (mine) for (const op of S.ops.filter((o) => o.id === it.id)) if (op.ts + skew > ((it.clock || {})[op.field] || 0)) it[op.field] = op.value;
     S.items[it.id] = it;
   }
   for (const a of d.annotations || []) S.anns[a.id] = a;
