@@ -161,7 +161,9 @@ const Jukebox = (() => {
       if (J.pos >= J.order.length) { J.pos = 0; J.order = []; J.tracks = []; audio.pause(); audio.removeAttribute("src"); return changed(); }
       return loadTrack(play);
     }
-    audio.src = (A && A.mediaUrl && A.mediaUrl(fileName(t))) || (A && A.mediaUrlAsync ? await A.mediaUrlAsync(fileName(t)) : "") || "/local/" + encodeURIComponent(fileName(t));
+    const src = (A && A.mediaUrl && A.mediaUrl(fileName(t))) || (A && A.mediaUrlAsync ? await A.mediaUrlAsync(fileName(t)) : "") || "/local/" + encodeURIComponent(fileName(t));
+    if (cur() !== t) return;        // (stopped or skipped while it was being found)
+    audio.src = src;
     if (play) audio.play().catch(() => {});
     change(t.id, { opened_at: now() });
     if ("mediaSession" in navigator) {
@@ -217,14 +219,16 @@ const Jukebox = (() => {
       else if (cmd === "stop") stop();
     },
   };
-  function stop() { J.tracks = []; J.order = []; J.pos = 0; audio.pause(); audio.removeAttribute("src"); changed(); }
+  // (load() after the src goes: the player lets go of the song completely, rather than holding it paused)
+  function stop() { J.tracks = []; J.order = []; J.pos = 0; audio.pause(); audio.removeAttribute("src"); audio.load(); changed(); }
   function paintBar() {
     let b = $("#jxBar");
     const t = cur(), was = !!b;
     if (!t) { if (b) { b.remove(); document.body.classList.remove("has-jx"); placeBar(true); } return; }
     if (!b) { b = document.createElement("div"); b.id = "jxBar"; b.className = "jx-bar"; document.body.append(b); }
     document.body.classList.add("has-jx");
-    b.innerHTML = `<button class="jx-barinfo" data-jx-open>${t.has_cover ? cover(t, false) : `<span class="jx-vinyl"></span>`}<span><b>${esc(t.title)}</b><small>${esc(t.album_artist || (t.authors || [])[0] || "")}</small></span></button>
+    b.innerHTML = `<button class="jx-puck ${audio.paused ? "" : "spin"}" data-jx-puck aria-label="Music controls">${t.has_cover ? cover(t, false) : `<span class="jx-vinyl"></span>`}</button><small class="jx-rtitle">${esc(t.title)}</small>
+      <button class="jx-b jx-replay" data-jx="replay" aria-label="Play this song again">↺</button><button class="jx-barinfo" data-jx-open>${t.has_cover ? cover(t, false) : `<span class="jx-vinyl"></span>`}<span><b>${esc(t.title)}</b><small>${esc(t.album_artist || (t.authors || [])[0] || "")}</small></span></button>
       <button class="jx-b" data-jx="prev" aria-label="Previous">⏮</button><button class="jx-b jx-play" data-jx="toggle" aria-label="Play or pause">${audio.paused ? "▶" : "❚❚"}</button><button class="jx-b" data-jx="next" aria-label="Next">⏭</button><button class="jx-b jx-stop" data-jx="stop" aria-label="Stop">■</button><i class="jx-barfill" id="jxFill"></i>`;
     placeBar(!was);
   }
@@ -233,6 +237,8 @@ const Jukebox = (() => {
   function placeBar(moved) {
     if (moved && typeof placeBrowser === "function") placeBrowser();
   }
+  let fold = null;
+  function foldLater() { clearTimeout(fold); fold = setTimeout(() => { const b = $("#jxBar"); if (b) b.classList.remove("open"); }, 5000); }
 
   audio.addEventListener("ended", () => next(true));
   audio.addEventListener("play", changed);
@@ -240,6 +246,7 @@ const Jukebox = (() => {
   audio.addEventListener("error", () => { if (cur()) { toast(onPhone(cur()) ? "That song couldn't be played." : "Can't reach your computer to stream that song."); } });
   audio.addEventListener("timeupdate", () => {
     const f = $("#jxFill"); if (f) f.style.width = (audio.duration ? (audio.currentTime / audio.duration) * 100 : 0) + "%";
+    const b = $("#jxBar"); if (b) b.style.setProperty("--jp", (audio.duration ? (audio.currentTime / audio.duration) * 100 : 0).toFixed(1) + "%");
     const sk = $("#jxSeek");
     if (sk && document.activeElement !== sk) { sk.max = audio.duration || 0; sk.value = audio.currentTime; $("#jxAt").textContent = fmt(audio.currentTime); $("#jxDur").textContent = fmt(audio.duration); }
   });
@@ -270,10 +277,14 @@ const Jukebox = (() => {
     const up = t.closest("[data-jx-up]");
     if (up) { const n = Number(up.dataset.jxUp); if (n > J.pos + 1) { [J.order[n - 1], J.order[n]] = [J.order[n], J.order[n - 1]]; changed(); } return; }
     const dl = t.closest("[data-jx-del]"); if (dl) { J.order.splice(Number(dl.dataset.jxDel), 1); return changed(); }
+    // reading: the bar is a little record in the corner; a tap opens its controls, which fold away again by themselves
+    if (t.closest("[data-jx-puck]")) { const b = $("#jxBar"); b.classList.toggle("open"); return foldLater(); }
+    if (t.closest("#jxBar")) foldLater();
     const c = t.closest("[data-jx]");
     if (!c) return;
     const k = c.dataset.jx;
     if (k === "toggle") toggle();
+    else if (k === "replay") { audio.currentTime = 0; if (audio.paused) toggle(); }
     else if (k === "next") next();
     else if (k === "prev") prev();
     else if (k === "shuffle") setShuffle(!J.shuffle);
@@ -294,5 +305,5 @@ const Jukebox = (() => {
     playList(list, Math.max(0, list.indexOf(it)), false);
   }
   function pauseForVideo() { if (!audio.paused) audio.pause(); }
-  return { html, playItem, openNow, note, pauseForVideo, paintDl };
+  return { html, playItem, openNow, note, pauseForVideo, paintDl, command: self.command };
 })();

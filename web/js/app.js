@@ -386,12 +386,13 @@ const Media = {
     if (this.owner !== owner) return;
     this.owner = null; this.last = "";
     if (A && A.mediaState) A.mediaState("");
-    if (window.Jukebox && owner !== Jukebox) Jukebox.note();       // (a video closed: the jukebox's song, if any, is shown again)
+    if (typeof Jukebox !== "undefined") Jukebox.note();       // (a video closed: the jukebox's song, if any, is shown again)
   },
 };
 window.Native.media = (cmd) => {
   if (cmd === "ended") { Media.last = ""; return; }          // (the notification went away by itself)
   if (Media.owner) Media.owner.command(cmd);
+  else if ((cmd === "stop" || cmd === "pause") && typeof Jukebox !== "undefined") Jukebox.command(cmd);     // (nobody shown: the music still obeys stop)
 };
 window.Native.nubMoved = (f) => { S.nubY = Math.max(0.06, Math.min(0.94, Number(f) || 0.5)); placeNub(); saveState(); };
 (() => {

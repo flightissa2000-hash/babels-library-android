@@ -63,6 +63,7 @@ Object.assign(window.Reader, (() => {
     const kind = ext === "pdf" ? "pdf" : ext === "epub" ? "epub" : COMIC.test(ext) ? "comic" : VIDEO.test(ext) ? "video" : AUDIO.test(ext) ? "audio" : "other";
     R = { it, name, url, ext, kind, active: null, pinMode: false };
     window.Reader.open = true;
+    document.documentElement.classList.add("reading");        // (the music bar shrinks to a little record in the corner)
     if (A) A.keepAwake(true);
     if (window.PageKeys) PageKeys.capture(["pdf", "epub", "comic"].includes(kind));      // (the page-turn buttons: books only)
     change(it.id, { opened_at: now() });
@@ -91,6 +92,7 @@ Object.assign(window.Reader, (() => {
     try { R.cleanup && R.cleanup(); } catch (e) {}
     R = null;
     window.Reader.open = false;
+    document.documentElement.classList.remove("reading");
     if (A) A.keepAwake(false);
     if (window.PageKeys) PageKeys.capture(false);
     const el = $("#reader");

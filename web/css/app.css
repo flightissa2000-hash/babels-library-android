@@ -1427,3 +1427,24 @@ html.eink .btm-q p::after{color:#000!important}
 .ct-ser-b small{font-size:.62rem;color:var(--ink-soft)}
 .ct-ser-b.here .ct-ser-c{outline:3px solid var(--accent);outline-offset:1px}
 .ct-ser-h .ct-ser-k{display:block;margin:0 0 2px;font-weight:800;font-size:.62rem;letter-spacing:.14em;text-transform:uppercase}
+/* reading with music on: the bar shrinks to a little turning record in a corner (its ring is how far the song has got);
+   a tap opens ↺ ⏮ ⏯ ⏭ ■ beside it, folded away again after a few seconds */
+.jx-puck,.jx-rtitle,.jx-replay{display:none}
+html.reading .jx-bar{left:12px;right:auto!important;bottom:calc(14px + env(safe-area-inset-bottom));padding:3px;gap:0;border:0;border-radius:999px;background:rgba(15,15,15,.5);color:#fff;box-shadow:none;opacity:.6;
+  transition:opacity .2s,bottom .2s}
+html.reading .jx-bar>*:not(.jx-puck){display:none}
+html.reading .jx-bar.open{opacity:1;padding:3px 8px 3px 3px;gap:2px;background:rgba(15,15,15,.9);box-shadow:0 6px 18px rgba(0,0,0,.4)}
+html.reading .jx-bar.open>.jx-b{display:grid;place-items:center;width:40px;height:40px;font-size:1.05rem}
+html.reading .jx-bar.open>.jx-rtitle{display:block;max-width:80px;margin:0 4px;font-size:.7rem;opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+html.reading .jx-bar.open .jx-play{background:var(--jx-trim);color:var(--jx-cab2)}
+html.reading:has(#reader:not(.calm)) .jx-bar{bottom:calc(64px + env(safe-area-inset-bottom))}
+/* (while you read, the closed record is smaller and fainter, tucked into the corner) */
+html.reading:has(#reader.calm) .jx-bar:not(.open){left:4px;bottom:calc(4px + env(safe-area-inset-bottom));opacity:.35;background:transparent}
+html.reading:has(#reader.calm) .jx-bar:not(.open) .jx-puck{width:34px;height:34px}
+html.reading:has(#reader.calm) .jx-bar:not(.open) .jx-puck :is(.cov,.jx-vinyl){width:29px;height:29px}
+html.reading .jx-puck{position:relative;display:grid;place-items:center;width:42px;height:42px;padding:0;border:0;border-radius:50%;background:conic-gradient(var(--jx-trim) var(--jp,0%),rgba(255,255,255,.22) 0)}
+.jx-puck .cov,.jx-puck .jx-vinyl{width:36px;height:36px;border-radius:50%;overflow:hidden;aspect-ratio:auto;box-shadow:0 0 0 2px #111}
+.jx-puck .cov .here{display:none}
+.jx-puck.spin .cov,.jx-puck.spin .jx-vinyl{animation:jxspin 4s linear infinite}
+.jx-puck:not(.spin)::after{content:"▶";position:absolute;inset:3px;display:grid;place-items:center;border-radius:50%;background:rgba(0,0,0,.45);color:#fff;font-size:.7rem}
+html.reading[data-theme=eink] .jx-bar{background:#fff;color:#000;border:1.5px solid #000;opacity:1}
