@@ -67,7 +67,12 @@ public class BabelWidget extends AppWidgetProvider {
         if (t == null) t = new JSONObject();
         int bg = color(t, "bg", 0xFFFFF6E0), ink = color(t, "ink", 0xFF22304A), soft = color(t, "soft", 0xFF5A6478),
             accent = color(t, "accent", 0xFFFF6B4A), surface = color(t, "surface", 0xFFFFFFFF);
-        RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget);
+        // its size picks the layout: one row = just the book; big = recently opened, a tally and shortcuts too
+        // (portrait: the height that counts is the max one)
+        Bundle o = m.getAppWidgetOptions(wid);
+        int hDp = o == null ? 0 : o.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0);
+        boolean big = hDp >= 330, tall = hDp == 0 || hDp >= 100;
+        RemoteViews v = new RemoteViews(c.getPackageName(), big ? R.layout.widget_large : R.layout.widget);
         v.setInt(R.id.w_bg, "setColorFilter", bg);
         v.setInt(R.id.w_chbg, "setColorFilter", surface);
         v.setTextColor(R.id.w_label, accent);
@@ -84,7 +89,7 @@ public class BabelWidget extends AppWidgetProvider {
             v.setTextViewText(R.id.w_pct, it.optString("note"));
             v.setImageViewBitmap(R.id.w_bar, bar(p, accent, (soft & 0x00FFFFFF) | 0x40000000));
             v.setViewVisibility(R.id.w_bar, View.VISIBLE);
-            v.setImageViewBitmap(R.id.w_cover, cover(c, it));
+            v.setImageViewBitmap(R.id.w_cover, cover(c, it, 240, 360));
             v.setViewVisibility(R.id.w_cover, View.VISIBLE);
             v.setOnClickPendingIntent(R.id.w_now, open(c, 1, it.optInt("id"), null));
         } else {
@@ -97,15 +102,58 @@ public class BabelWidget extends AppWidgetProvider {
             v.setOnClickPendingIntent(R.id.w_now, open(c, 1, 0, null));
         }
 
-        // short widget (one row of the home grid): just the book
-        Bundle o = m.getAppWidgetOptions(wid);
-        boolean tall = o == null || o.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110) >= 100;
+        if (big) drawBig(c, v, d, hDp, ink, soft, accent, surface);
         if (ch != null && tall) {
             v.setTextViewText(R.id.w_chtext, ch.optString("text"));
             v.setViewVisibility(R.id.w_ch, View.VISIBLE);
             v.setOnClickPendingIntent(R.id.w_ch, open(c, 2, 0, "bulletin"));
         } else v.setViewVisibility(R.id.w_ch, View.GONE);
         m.updateAppWidget(wid, v);
+    }
+
+    private static final int[][] ROWS = {
+        {R.id.w_r1, R.id.w_r1c, R.id.w_r1t, R.id.w_r1b, R.id.w_r1bar, R.id.w_r1p},
+        {R.id.w_r2, R.id.w_r2c, R.id.w_r2t, R.id.w_r2b, R.id.w_r2bar, R.id.w_r2p},
+        {R.id.w_r3, R.id.w_r3c, R.id.w_r3t, R.id.w_r3b, R.id.w_r3bar, R.id.w_r3p},
+        {R.id.w_r4, R.id.w_r4c, R.id.w_r4t, R.id.w_r4b, R.id.w_r4bar, R.id.w_r4p}};
+    private static final int[][] BTNS = {
+        {R.id.w_b1, R.id.w_b1bg, R.id.w_b1t}, {R.id.w_b2, R.id.w_b2bg, R.id.w_b2t},
+        {R.id.w_b3, R.id.w_b3bg, R.id.w_b3t}, {R.id.w_b4, R.id.w_b4bg, R.id.w_b4t}};
+    private static final String[] BTN_TABS = {"library", "journal", "note", "browser"};
+
+    /** the big widget's extras: a tally, as many recently opened items as there's room for, and shortcuts */
+    private static void drawBig(Context c, RemoteViews v, JSONObject d, int hDp, int ink, int soft, int accent, int surface) {
+        String stats = d.optString("stats");
+        v.setTextViewText(R.id.w_stats, stats);
+        v.setTextColor(R.id.w_stats, soft);
+        v.setViewVisibility(R.id.w_stats, stats.isEmpty() ? View.GONE : View.VISIBLE);
+        v.setTextColor(R.id.w_rlabel, accent);
+        org.json.JSONArray rec = d.optJSONArray("recent");
+        // room left after the current item, the tally, the challenge and the shortcuts: 64dp a row
+        int room = Math.max(0, Math.min(ROWS.length, (hDp - 320) / 64));
+        int n = rec == null ? 0 : Math.min(room, rec.length());
+        v.setViewVisibility(R.id.w_rlabel, n > 0 ? View.VISIBLE : View.GONE);
+        int track = (soft & 0x00FFFFFF) | 0x40000000;
+        for (int i = 0; i < ROWS.length; i++) {
+            int[] r = ROWS[i];
+            JSONObject x = i < n ? rec.optJSONObject(i) : null;
+            if (x == null) { v.setViewVisibility(r[0], View.GONE); continue; }
+            v.setViewVisibility(r[0], View.VISIBLE);
+            v.setImageViewBitmap(r[1], cover(c, x, 80, 120));
+            v.setTextViewText(r[2], x.optString("title"));
+            v.setTextColor(r[2], ink);
+            v.setTextViewText(r[3], x.optString("by"));
+            v.setTextColor(r[3], soft);
+            v.setImageViewBitmap(r[4], bar(x.optInt("pct"), accent, track));
+            v.setTextViewText(r[5], x.optString("short"));
+            v.setTextColor(r[5], x.optInt("pct") >= 98 ? accent : ink);
+            v.setOnClickPendingIntent(r[0], open(c, 10 + i, x.optInt("id"), null));
+        }
+        for (int i = 0; i < BTNS.length; i++) {
+            v.setInt(BTNS[i][1], "setColorFilter", surface);
+            v.setTextColor(BTNS[i][2], ink);
+            v.setOnClickPendingIntent(BTNS[i][0], open(c, 20 + i, 0, BTN_TABS[i]));
+        }
     }
 
     private static PendingIntent open(Context c, int req, int item, String tab) {
@@ -132,13 +180,12 @@ public class BabelWidget extends AppWidgetProvider {
     }
 
     /** the cover the app has already fetched; otherwise the title on a coloured cover, like the app shows */
-    private static Bitmap cover(Context c, JSONObject it) {
+    private static Bitmap cover(Context c, JSONObject it, int w, int h) {
         int id = it.optInt("id");
         File dir = new File(c.getCacheDir(), "covers");
         File[] fs = dir.listFiles((x, n) -> n.startsWith(id + "_"));
         Bitmap src = null;
         if (fs != null && fs.length > 0) src = BitmapFactory.decodeFile(fs[0].getPath());
-        int w = 240, h = 360;
         Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(b);
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
@@ -152,21 +199,21 @@ public class BabelWidget extends AppWidgetProvider {
             mx.postTranslate((w - src.getWidth() * s) / 2f, (h - src.getHeight() * s) / 2f);
             sh.setLocalMatrix(mx);
             p.setShader(sh);
-            cv.drawRoundRect(r, 14, 14, p);
+            cv.drawRoundRect(r, w / 17f, w / 17f, p);
             return b;
         }
         int col;
         try { col = Color.parseColor(it.optString("color")); } catch (Exception e) { col = 0xFF4AA8FF; }
         p.setColor(col);
-        cv.drawRoundRect(r, 14, 14, p);
+        cv.drawRoundRect(r, w / 17f, w / 17f, p);
         TextPaint tp = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         tp.setColor(Color.luminance(col) > 0.5f ? 0xFF111111 : Color.WHITE);
-        tp.setTextSize(30);
+        tp.setTextSize(w / 8f);
         tp.setFakeBoldText(true);
-        StaticLayout sl = StaticLayout.Builder.obtain(it.optString("title"), 0, it.optString("title").length(), tp, w - 36)
+        StaticLayout sl = StaticLayout.Builder.obtain(it.optString("title"), 0, it.optString("title").length(), tp, w - w / 7)
             .setAlignment(Layout.Alignment.ALIGN_CENTER).setMaxLines(6).setEllipsize(android.text.TextUtils.TruncateAt.END).build();
         cv.save();
-        cv.translate(18, (h - sl.getHeight()) / 2f);
+        cv.translate(w / 14f, (h - sl.getHeight()) / 2f);
         sl.draw(cv);
         cv.restore();
         return b;

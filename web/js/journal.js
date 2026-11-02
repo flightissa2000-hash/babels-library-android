@@ -411,5 +411,5 @@ const Journal = (() => {
     }
   });
 
-  return { render, open, forItem, isOpen: () => openId != null && !$("#sheet").hidden, close: () => { openId = null; } };
+  return { render, open, forItem, quick: openQuick, isOpen: () => openId != null && !$("#sheet").hidden, close: () => { openId = null; } };
 })();

@@ -31,7 +31,7 @@ function store(name, obj) { const t = JSON.stringify(obj); if (A) A.save(name, t
 function saveState() {
   store("state.json", { conn: S.conn, since: S.since, lastSync: S.lastSync, theme: S.theme, themeChoice: S.themeChoice, autoGet: S.autoGet, downloads: S.downloads,
     readMode: S.readMode, search: S.search, nav: S.nav, eink: S.eink, jstyle: S.jstyle, tabsOff: S.tabsOff, blayout: S.blayout, bsecond: S.bsecond, bhome: S.bhome,
-    area: S.area, kind: S.kind, libLayout: S.libLayout, groupBy: S.groupBy, groupByArea: S.groupByArea, sort: S.sort, coll: S.coll });
+    area: S.area, kind: S.kind, libLayout: S.libLayout, groupBy: S.groupBy, groupByArea: S.groupByArea, sort: S.sort, coll: S.coll, readFont: S.readFont, readGap: S.readGap });
 }
 /* ---------------------------------------------------------------- profiles
    The computer keeps the profiles (everyone who uses the library): the phone is logged in as one of them and sees its
@@ -1225,7 +1225,8 @@ window.Widget = (() => {
   function data() {
     const cs = getComputedStyle(document.documentElement), c = (v) => hex(cs.getPropertyValue(v));
     const theme = { bg: c("--bg"), surface: c("--surface"), ink: c("--ink"), soft: c("--ink-soft"), accent: c("--accent") };
-    const it = Object.values(S.items).filter((i) => i.opened_at && i.kind !== "music").sort((a, b) => b.opened_at - a.opened_at)[0];
+    const all = Object.values(S.items), opened = all.filter((i) => i.opened_at && i.kind !== "music").sort((a, b) => b.opened_at - a.opened_at);
+    const it = opened[0];
     let item = null;
     if (it) {
       const p = pct(it), st = W.status(it)[0];
@@ -1235,7 +1236,18 @@ window.Widget = (() => {
     }
     const ch = load(Bulletin.file(), null), ci = ch && S.items[ch.id];
     const challenge = ci ? { id: ci.id, text: (Bulletin.done(ch, ci) ? "✓ Challenge complete: " : `This week: ${ch.type === "finish" ? "finish" : ch.type === "start" ? "start" : "revisit"} `) + W.title(ci) } : null;
-    return { theme, item, challenge };
+    // (the big widget) the next few opened, and a tally
+    const recent = opened.slice(1, 5).map((x) => {
+      const p = pct(x);
+      return { id: x.id, title: W.title(x).trim(), by: [byline(x), ago(x.opened_at)].filter(Boolean).join(" · "), pct: p, short: x.watched || p >= 98 ? "✓" : p ? p + "%" : "new",
+        has_cover: !!x.has_cover, cover_v: String(x.cover_v || 0), color: colorFor(x) };
+    });
+    const yr = new Date().getFullYear(), since = new Date(yr, 0, 1).getTime() / 1000;
+    const doneYr = Prof.isMain() ? S.log.filter((l) => l.finished && Date.parse(l.finished) / 1000 >= since).length
+      : all.filter((x) => (x.watched_at || 0) >= since).length;
+    const going = all.filter((x) => x.has_file && x.kind !== "music" && W.status(x)[0] === "now").length, here = all.filter(onPhone).length;
+    const stats = [going && `📖 ${going} reading`, `✓ ${doneYr} finished in ${yr}`, here && `📱 ${here} on phone`].filter(Boolean).join("  ·  ");
+    return { theme, item, challenge, recent, stats };
   }
   function update() {
     if (!A || !A.setWidget) return;
@@ -1253,6 +1265,8 @@ window.Widget = (() => {
   }
   function tab(t) {
     if (t === "bulletin") { W.tab = "bulletin"; store("hometab.json", W.tab); }
+    if (t === "library" || t === "journal" || t === "browser") return setTab(t);
+    if (t === "note") { setTab("journal"); return Journal.quick(); }
     setTab("home");
   }
   return { update, open, tab, data };

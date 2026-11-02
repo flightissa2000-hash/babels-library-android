@@ -544,6 +544,7 @@ Object.assign(window.Reader, (() => {
     const m = modeOf("epub"), scrolling = m === "scroll";
     const box = document.createElement("div");
     box.className = "r-epub";
+    box.style.inset = `${S.readGap || 0}px 0`;          // (Aa → the gap above and below the text)
     st.appendChild(box);
     const th = S.eink ? { bg: "#fff", ink: "#000", font: "Georgia, serif" } : ((window.THEMES || {})[document.documentElement.dataset.theme] || {}).reader || { bg: "#fff", ink: "#222", font: "serif" };   // (e-reader mode: black on white)
     $("#reader").style.background = th.bg;
@@ -830,7 +831,8 @@ Object.assign(window.Reader, (() => {
     const pdfComic = key === "comic" || (key === "pdf" && R.it.kind === "graphic");
     sheet(`<div class="rs-head"><b>Layout</b><button class="btn sm" data-rs-close>Done</button></div><div class="rs-body">
       <div class="vs-modes">${b("pages", "One page", "Tap or swipe to turn")}${b("double", "Two pages", "Side by side, like an open book")}${b("scroll", "Scrolling", "One long page")}</div>
-      ${key === "epub" ? `<label class="vs-row">Text size <input type="range" min="70" max="180" step="5" value="${S.readFont || 100}" data-vs-font><b data-vs-fontv>${S.readFont || 100}%</b></label>` : ""}
+      ${key === "epub" ? `<label class="vs-row">Text size <input type="range" min="70" max="180" step="5" value="${S.readFont || 100}" data-vs-font><b data-vs-fontv>${S.readFont || 100}%</b></label>
+        <label class="vs-row">Gap above and below <input type="range" min="0" max="120" step="4" value="${S.readGap || 0}" data-vs-gap><b data-vs-gapv>${S.readGap || 0}px</b></label>` : ""}
       ${key !== "epub" && m !== "scroll" ? `<label class="vs-row check"><input type="checkbox" data-vs-fitw ${$("#rStage").classList.contains("fitw") ? "checked" : ""}> Fit the width (scroll down the page)</label>` : ""}
       ${pdfComic ? `<label class="vs-row check"><input type="checkbox" data-vs-rtl ${rtl() ? "checked" : ""}> Right to left (manga)</label>` : ""}
       </div>`, "view");
@@ -1214,6 +1216,13 @@ Object.assign(window.Reader, (() => {
       $("[data-vs-fontv]").textContent = S.readFont + "%";
       R.rend && R.rend.themes.fontSize(S.readFont + "%");
       clearTimeout(R.fontT); R.fontT = setTimeout(() => { saveState(); drawEpubPins(); }, 500);
+    }
+    if (e.target.matches("[data-vs-gap]")) {
+      S.readGap = Number(e.target.value);
+      $("[data-vs-gapv]").textContent = S.readGap + "px";
+      const box = $(".r-epub");
+      if (box) box.style.inset = `${S.readGap}px 0`;
+      clearTimeout(R.gapT); R.gapT = setTimeout(() => { try { R.rend && R.rend.resize(); } catch (err) {} saveState(); drawEpubPins(); }, 250);
     }
   });
   document.addEventListener("change", (e) => {

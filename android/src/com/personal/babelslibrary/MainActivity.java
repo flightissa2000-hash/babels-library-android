@@ -928,8 +928,13 @@ public class MainActivity extends Activity {
             if (!save("widget.json", json)) return;
             new Thread(() -> {
                 try {
-                    org.json.JSONObject it = new org.json.JSONObject(json).optJSONObject("item");
-                    if (it != null && it.optBoolean("has_cover")) cover(String.valueOf(it.optInt("id")), it.optString("cover_v", "0"));
+                    org.json.JSONObject d = new org.json.JSONObject(json);
+                    List<org.json.JSONObject> all = new ArrayList<>();
+                    all.add(d.optJSONObject("item"));
+                    org.json.JSONArray rec = d.optJSONArray("recent");
+                    for (int k = 0; rec != null && k < rec.length(); k++) all.add(rec.optJSONObject(k));
+                    for (org.json.JSONObject it : all)
+                        if (it != null && it.optBoolean("has_cover")) try { cover(String.valueOf(it.optInt("id")), it.optString("cover_v", "0")); } catch (Exception ignored) { }
                 } catch (Exception ignored) { }
                 BabelWidget.refresh(MainActivity.this);
             }).start();
