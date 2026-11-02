@@ -36,24 +36,54 @@ const Jukebox = (() => {
     const seen = new Set();
     albumsNow = [];
     const sections = [];
+    let n = 0;
     groups.forEach(([name, items], gi) => {
       const list = albums(items).filter((a) => !seen.has(a.key));
       list.forEach((a) => seen.add(a.key));
       if (!list.length) return;
-      const letter = String.fromCharCode(65 + (sections.length % 26));
-      sections.push(`<div class="jx-row"><span class="jx-rowname"><b>${letter}</b>${esc(name)}</span>${list.map((a, i) => {
+      const letter = String.fromCharCode(65 + (n++ % 26));
+      // (a group named after its only album says nothing new: those run together in one panel, each keeping its letter)
+      const named = !(list.length === 1 && String(name).toLowerCase() === list[0].title.toLowerCase());
+      const strips = list.map((a, i) => {
         albumsNow.push(a);
-        const here = a.tracks.filter(onPhone).length;
-        return `<button class="jx-strip" data-jx-album="${albumsNow.length - 1}"><span class="jx-code">${letter}${i + 1}</span>
-          <span class="jx-art">${a.cover ? cover(a.cover, false) : `<span class="jx-vinyl"></span>`}</span>
-          <span class="jx-t"><b>${esc(a.title)}</b><small>${esc(a.artist)}${a.year ? " · " + esc(a.year) : ""}</small><small>${a.tracks.length} ${a.tracks.length === 1 ? "song" : "songs"}${here && here < a.tracks.length ? ` · ${here} on this phone` : here ? " · on this phone" : " · not on this phone"}</small></span>
-          <span class="jx-go" data-jx-playalbum="${albumsNow.length - 1}" aria-label="Play">▶</span></button>`;
-      }).join("")}</div>`);
+        return `<button class="jx-strip" data-jx-album="${albumsNow.length - 1}">
+          <span class="jx-art">${a.cover ? cover(a.cover, false) : `<span class="jx-vinyl"></span>`}<span class="jx-code">${letter}${i + 1}</span>
+            <span class="jx-go" data-jx-playalbum="${albumsNow.length - 1}" aria-label="Play">▶</span></span>
+          <span class="jx-t"><b>${esc(a.title)}</b><small>${esc(a.artist)}</small><small class="jx-st">${stripNote(a)}</small></span><i class="jx-dl"><i></i></i></button>`;
+      }).join("");
+      const last = sections[sections.length - 1];
+      if (!named && last && !last.name) last.strips += strips;
+      else sections.push({ name: named ? `<b>${letter}</b>${esc(name)}` : "", strips });
     });
-    return `<div class="jukebox"><div class="jx-arch"><span class="jx-neon"></span><b>BABEL</b><small>SELECT-A-SONG</small></div>
+    sections.forEach((s, i) => (sections[i] = `<div class="jx-row">${s.name ? `<span class="jx-rowname">${s.name}</span>` : ""}<div class="jx-strips">${s.strips}</div></div>`));
+    return `<div class="jukebox"><div class="jx-arch"><span class="jx-neon"></span><b>BABEL</b><small>SELECT · A · SONG</small></div>
       <div class="jx-window" id="jxWindow">${windowHtml()}</div>
-      <div class="jx-dial"><button class="btn" data-jx-all>⤨ Shuffle everything</button><button class="btn" data-jx-open>☰ Now playing</button></div>
-      <div class="jx-cards">${sections.join("") || `<p class="empty">No music yet.</p>`}</div><div class="jx-grille"></div></div>`;
+      <div class="jx-dial"><button class="btn" data-jx-all>⤨ Shuffle all</button><button class="btn" data-jx-open>☰ Now playing</button></div>
+      <div class="jx-cards">${sections.join("") || `<p class="empty">No music yet.</p>`}</div><div class="jx-grille"><i></i><i></i><i></i><i></i><i></i></div></div>`;
+  }
+  /* an album strip's small print: its songs, how many are on the phone, and any coming from the computer */
+  function stripNote(a) {
+    const n = a.tracks.length, here = a.tracks.filter(onPhone).length, coming = a.tracks.filter(getting).length;
+    const songs = `${n} ${n === 1 ? "song" : "songs"}`;
+    if (coming) return `⬇ ${here} of ${n} here`;
+    return here === n ? `${songs} · 📱` : here ? `${songs} · ${here} 📱` : songs;
+  }
+  /* downloads moving: each album strip with songs on the way shows how far along they are (gone once they're here) */
+  function paintDl() {
+    document.querySelectorAll(".jx-strip[data-jx-album]").forEach((el) => {
+      const a = albumsNow[Number(el.dataset.jxAlbum)];
+      if (!a) return;
+      let done = 0, total = 0;
+      for (const t of a.tracks) {
+        if (!getting(t)) continue;
+        const st = S.dlState[S.downloads[t.id]];
+        total += (st && st.total) || t.file_size || 0; done += (st && st.done) || 0;
+      }
+      const on = a.tracks.some(getting);
+      el.classList.toggle("getting", on);
+      el.querySelector(".jx-dl i").style.width = on ? Math.max(3, total ? (100 * done) / total : 0) + "%" : "0";
+      el.querySelector(".jx-st").textContent = stripNote(a);
+    });
   }
   function windowHtml() {
     const t = cur();
@@ -198,16 +228,11 @@ const Jukebox = (() => {
       <button class="jx-b" data-jx="prev" aria-label="Previous">⏮</button><button class="jx-b jx-play" data-jx="toggle" aria-label="Play or pause">${audio.paused ? "▶" : "❚❚"}</button><button class="jx-b" data-jx="next" aria-label="Next">⏭</button><button class="jx-b jx-stop" data-jx="stop" aria-label="Stop">■</button><i class="jx-barfill" id="jxFill"></i>`;
     placeBar(!was);
   }
-  /* the bar sits beside the tabs (never over them), and an open browser page ends above it, so both stay reachable */
+  /* the bar sits beside the side tabs (never over them; the CSS moves it with them as they tuck away or come back),
+     and an open browser page ends above it, so both stay reachable */
   function placeBar(moved) {
-    const b = $("#jxBar"), tabs = $("#tabs");
-    if (b) {
-      const r = tabs && !S.tabsOff && document.documentElement.dataset.nav !== "drawer" ? tabs.getBoundingClientRect() : null;
-      b.style.right = (r && r.width && r.left > innerWidth / 2 ? Math.round(innerWidth - r.left) + 8 : 8) + "px";
-    }
     if (moved && typeof placeBrowser === "function") placeBrowser();
   }
-  addEventListener("resize", () => placeBar(false));
 
   audio.addEventListener("ended", () => next(true));
   audio.addEventListener("play", changed);
@@ -269,5 +294,5 @@ const Jukebox = (() => {
     playList(list, Math.max(0, list.indexOf(it)), false);
   }
   function pauseForVideo() { if (!audio.paused) audio.pause(); }
-  return { html, playItem, openNow, note, pauseForVideo };
+  return { html, playItem, openNow, note, pauseForVideo, paintDl };
 })();

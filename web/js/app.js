@@ -1424,7 +1424,37 @@ function renderPhone(v, items) {
     ${coming.length ? `<section class="sec"><h2>Downloading</h2><div class="list" id="dlList">${coming.map(row).join("")}</div></section>` : ""}
     <section class="sec"><h2>On this phone</h2>${here.length ? `<div class="list">${here.map(row).join("")}</div>` : `<p class="hint">Files you get from the computer are kept here so you can read and watch offline.</p>`}</section>`;
 }
+/* anything coming from the computer: a little pill at the bottom on every tab, with how far along it is; it says
+   "all here" when the last one lands and then goes away by itself. Tap it for the Phone page's list. */
+let dlPillOut = null;
+function paintDlPill() {
+  const ids = Object.keys(S.downloads);
+  let p = $("#dlPill");
+  if (!ids.length) {
+    if (p && !p.classList.contains("done")) {
+      p.classList.add("done");
+      p.innerHTML = `<b>✓</b><span><b>All here</b><small>Ready on this phone</small></span>`;
+      clearTimeout(dlPillOut);
+      dlPillOut = setTimeout(() => { p.classList.add("out"); setTimeout(() => p.remove(), 400); }, 2500);
+    }
+    return;
+  }
+  clearTimeout(dlPillOut);
+  if (!p || p.classList.contains("done")) { if (p) p.remove(); p = document.createElement("button"); p.id = "dlPill"; p.className = "dl-pill"; document.body.append(p); }
+  let done = 0, total = 0;
+  for (const id of ids) {
+    const st = S.dlState[S.downloads[id]], it = S.items[id] || {};
+    total += (st && st.total > 0 ? st.total : it.file_size) || 0; done += (st && st.done) || 0;
+  }
+  const pc = total ? Math.min(100, Math.round((100 * done) / total)) : 0;
+  const first = S.items[ids[0]] || {}, paused = ids.every((id) => (S.dlState[S.downloads[id]] || {}).state === "paused");
+  p.style.setProperty("--p", pc + "%");
+  p.innerHTML = `<b class="dl-ring">${total ? pc + "%" : "⬇"}</b><span><b>${ids.length === 1 ? esc(first.title || "Downloading") : `Getting ${ids.length} files`}</b>
+    <small>${paused ? "Paused · waiting for a connection" : total ? `${fmtSize(done)} of ${fmtSize(total)}` : "Starting…"}</small></span>`;
+}
 function paintDownloads() {
+  paintDlPill();
+  if (typeof Jukebox !== "undefined") Jukebox.paintDl();
   const box = $("#dlList");
   if (box) box.innerHTML = Object.keys(S.downloads).map((id) => S.items[id]).filter(Boolean).map(row).join("");
   const sheetDl = $("#sheet [data-dlbar]");
@@ -1949,6 +1979,7 @@ document.addEventListener("click", (e) => {
   const bc = t.closest("[data-bclear]"); if (bc) return clearHistory(bc.dataset.bclear);
   const jr = t.closest("[data-journal]"); if (jr) { const it = S.items[jr.dataset.journal]; return Journal.open(Journal.forItem(it).id); }
   if (t.closest("#myFiles")) { S.tab = "phone"; return render(); }
+  if (t.closest("#dlPill")) { setTab("home"); S.tab = "phone"; return render(); }
   if (t.closest("#look")) return lookForComputer();
   const pick = t.closest("[data-pick]"); if (pick) { $("#addr").value = pick.dataset.pick; S.pairAddr = pick.dataset.pick; $("#code").focus(); return; }
   if (t.closest("#pairBtn")) return pair();
