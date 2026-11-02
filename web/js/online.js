@@ -13,6 +13,7 @@ const Online = (() => {
     lancet: "https://www.thelancet.com/rssfeed/lancet_current.xml", jama: "https://jamanetwork.com/rss/site_3/67.xml", natmed: "https://www.nature.com/nm.rss",
     plosmed: "https://journals.plos.org/plosmedicine/feed/atom", nclimate: "https://www.nature.com/nclimate.rss", sciadv: "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciadv",
     nchem: "https://www.nature.com/nchem.rss", natmi: "https://www.nature.com/natmachintell.rss", science: "https://www.science.org/rss/news_current.xml" };
+  const WORLD = ["https://feeds.bbci.co.uk/news/world/rss.xml", "https://www.aljazeera.com/xml/rss/all.xml", "https://feeds.npr.org/1004/rss.xml", "https://www.theguardian.com/world/rss"];
   const SCIENCE = [
     ["labs", "Straight from the labs", ["https://news.mit.edu/rss/research", "https://www.nih.gov/news-releases/feed.xml", "https://www.nasa.gov/news-release/feed/",
       "https://www.esa.int/rssfeed/Our_Activities/Space_Science", "https://news.harvard.edu/gazette/section/science-technology/feed/", "https://www.cam.ac.uk/news/feed"]],
@@ -27,7 +28,7 @@ const Online = (() => {
     [J.natastron]: "Nature Astronomy", [J.cell]: "Cell", [J.elife]: "eLife", [J.plosbio]: "PLOS Biology", [J.nejm]: "NEJM", [J.lancet]: "The Lancet", [J.jama]: "JAMA",
     [J.natmed]: "Nature Medicine", [J.plosmed]: "PLOS Medicine", [J.nclimate]: "Nature Climate Change", [J.sciadv]: "Science Advances", [J.nchem]: "Nature Chemistry",
     [J.natmi]: "Nature Machine Intelligence", [J.science]: "Science" };
-  const OUTLET = { "phys.org": "Phys.org", "techxplore.com": "Tech Xplore", "medicalxpress.com": "Medical Xpress", "sciencedaily.com": "ScienceDaily", "mit.edu": "MIT News", "nih.gov": "NIH",
+  const OUTLET = { "aljazeera.com": "Al Jazeera", "npr.org": "NPR", "theguardian.com": "The Guardian", "bbc.co.uk": "BBC News", "bbc.com": "BBC News", "phys.org": "Phys.org", "techxplore.com": "Tech Xplore", "medicalxpress.com": "Medical Xpress", "sciencedaily.com": "ScienceDaily", "mit.edu": "MIT News", "nih.gov": "NIH",
     "nasa.gov": "NASA", "esa.int": "ESA", "harvard.edu": "Harvard Gazette", "cam.ac.uk": "University of Cambridge" };
   const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 
@@ -106,6 +107,12 @@ const Online = (() => {
     const sections = await Promise.all(SCIENCE.map(async ([key, label, urls]) => ({ key, label, items: await many(urls, 30, true, fresh) })));
     if (!sections.some((s) => s.items.length)) throw new Error("The newsrooms can't be reached right now.");
     return { sections };
+  }
+  async function world(fresh) {
+    if (!UA_OK) throw new Error("");
+    const items = await many(WORLD, 30, false, fresh);
+    if (!items.length) throw new Error("The newsrooms can't be reached right now.");
+    return { items };
   }
   const gnews = (q, days) => "https://news.google.com/rss/search?" + new URLSearchParams({ q: q + (days ? ` when:${days}d` : ""), hl: "en-US", gl: "US", ceid: "US:en" });
   const KINDS = [["vote", /\bvot(e|es|ed|ing)\b|approv|passes|passed|rejects?|ballot|referendum/], ["ordinance", /ordinance|bylaw|zoning|code amendment|regulation|\bban\b/],
@@ -365,7 +372,7 @@ const Online = (() => {
   }
 
   /* the computer couldn't be reached (or this phone isn't paired): answer here if this is something the web can answer */
-  const handles = (method, path) => /^\/sync\/(news\/(science|local|article)|cat\/(promos|browse|subjects|search|byauthor|info|reviews|series|authors)|potd|define)\b/.test(path) || (method === "POST" && QUEUE.test(path.split("?")[0]));
+  const handles = (method, path) => /^\/sync\/(news\/(science|world|local|article)|cat\/(promos|browse|subjects|search|byauthor|info|reviews|series|authors)|potd|define)\b/.test(path) || (method === "POST" && QUEUE.test(path.split("?")[0]));
   async function answer(method, path, body) {
     const [p, qs] = path.split("?"), q = new URLSearchParams(qs || ""), fresh = q.has("fresh");
     if (method === "POST" && p === "/sync/news/place") return setPlace(body || {});
@@ -378,6 +385,7 @@ const Online = (() => {
       let d;
       if (p === "/sync/news/science") d = await science(fresh);
       else if (p === "/sync/news/local") d = await local(fresh);
+      else if (p === "/sync/news/world") d = await world(fresh);
       else if (p === "/sync/news/article") d = await article(q.get("url") || "");
       else if (p === "/sync/potd") d = await potd();
       else if (p === "/sync/define") d = await define(q.get("w") || "");

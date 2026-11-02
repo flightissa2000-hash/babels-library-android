@@ -93,5 +93,5 @@ const NewsTab = (() => {
       N.editing = false; N.loc = null; render($("#view"));
     } catch (err) { b.disabled = false; b.textContent = "Start delivery"; toast(err.message); }
   });
-  return { render };
+  return { render, read };
 })();

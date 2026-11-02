@@ -39,7 +39,7 @@ const Catalogue = (() => {
     }
     if (C.view === "browse") {
       const subs = C.subjects[C.cat];
-      v.innerHTML = head + `<div class="chips ct-aisles" id="ctAisles">${subs ? subs.map((x) => `<button data-ct-sub="${esc(x.key)}" class="${x.key === C.subject ? "on" : ""}">${esc(x.label)}</button>`).join("") : ""}</div><div id="ctBody">${note("Stocking the shelves…")}</div>`;
+      v.innerHTML = head + `<div class="chips ct-aisles" id="ctAisles">${subs ? subs.map((x) => `<button data-ct-sub="${esc(x.key)}" class="${x.key === C.subject ? "on" : ""}">${esc(x.label)}</button>`).join("") : ""}</div>${subs ? `<div class="ct-restock"><span>This aisle restocks itself weekly</span><button class="btn sm" data-ct-restock>↻ Refresh</button></div>` : ""}<div id="ctBody">${note("Stocking the shelves…")}</div>`;
       if (!subs) {
         get("subjects", {}).then((s) => { C.subjects[C.cat] = s; if (!s.some((x) => x.key === C.subject)) C.subject = s[0]?.key || "trending"; if (id === C.seq) render(v); }).catch((e) => fill(note(esc(e.message))));
         return;
@@ -118,6 +118,17 @@ const Catalogue = (() => {
     const c = t.closest("[data-ct-cat]"); if (c) { C.cat = c.dataset.ctCat; C.results = null; if (C.view === "who") C.view = "new"; return render($("#view")); }
     const vw = t.closest("[data-ct-view]"); if (vw) { C.view = vw.dataset.ctView; return render($("#view")); }
     const sb = t.closest("[data-ct-sub]"); if (sb) { C.subject = sb.dataset.ctSub; return render($("#view")); }
+    // ↻ in Browse: the computer restocks this aisle (new things you haven't been shown); without it, the list is fetched again
+    const rs = t.closest("[data-ct-restock]");
+    if (rs) {
+      const id = ++C.seq, b = $("#ctBody");
+      rs.disabled = true; rs.textContent = "Restocking…";
+      if (b) b.innerHTML = note("Restocking the shelves…");
+      const fill = (html) => { if (id === C.seq && S.tab === "catalogue") { const x = $("#ctBody"); if (x) x.innerHTML = html; } rs.disabled = false; rs.textContent = "↻ Refresh"; };
+      let first = true;
+      return live(() => first ? (first = false, api("POST", `/sync/cat/restock?${new URLSearchParams({ cat: C.cat, subject: C.subject })}`).catch(() => get("browse", { subject: C.subject })))
+        : get("browse", { subject: C.subject }), fill, id);
+    }
     const inf = t.closest("[data-ct-info]"); if (inf) return info(shown[Number(inf.dataset.ctInfo)]);
     const w = t.closest("[data-ct-want]"); if (w) { const r = shown[Number(w.dataset.ctWant)]; if (r) want(r, w); return; }
     const au = t.closest("[data-ct-author]"); if (au) { closeSheet(); return byAuthor(au.dataset.ctAuthor, au.dataset.ctKind || (C.cat === "manga" || C.cat === "comic" ? C.cat : "book")); }

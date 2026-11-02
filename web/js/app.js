@@ -279,7 +279,7 @@ async function api(method, path, body) {
   }
   let data = {};
   try { data = JSON.parse(r.text || "{}"); } catch (e) {}
-  if ((r.status === 401 || r.status === 403) && web && method === "GET") return Online.answer(method, path, body);     // (a phone the computer no longer knows: the web still answers)
+  if ((r.status === 401 || r.status === 403 || r.status === 404) && web && method === "GET") return Online.answer(method, path, body);     // (a phone the computer no longer knows: the web still answers)
   if (r.status >= 400) { const e = new Error(data.error || `Error ${r.status}`); e.status = r.status; throw e; }
   if (web) Online.remember(method, path, data);
   return data;
@@ -1089,11 +1089,6 @@ const Bulletin = (() => {
     if (reroll && cur && f.id === cur.id) return [it, type];
     return [f, W.status(f)[0] === "now" ? "finish" : "start"];
   }
-  // Still in the Wrapper: the series' first unread volume, and none from a series you're partway through
-  const wrapperPicks = (list) => {
-    const seen = new Set();
-    return list.map(firstUnread).filter((x) => !x.opened_at && W.status(x)[0] === "new" && !seen.has(x.id) && seen.add(x.id));
-  };
   function challenge(reroll = false) {
     const wk = weekStart(), cur = load(file(), null);
     const ci = cur && S.items[cur.id];
@@ -1123,9 +1118,8 @@ const Bulletin = (() => {
   const done = (c, it) => c.type === "finish" ? W.status(it)[0] === "done" : (it.opened_at || 0) > Math.max(c.week, c.since || 0);
 
   function html() {
-    const wk = weekStart(), r = rng(Prof.cur + "shelf" + wk);
+    const wk = weekStart();
     const c = challenge(), it = c && S.items[c.id];
-    const wrapped = wrapperPicks(shuffle(items().filter((i) => ["book", "graphic", "movie", "tv"].includes(i.kind) && i.has_file && !i.opened_at), r)).filter((i) => !(it && i.id === it.id)).slice(0, 6);
     const when = new Date(wk * 1000).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
     const issue = Math.max(1, Math.round((wk - Date.UTC(2026, 0, 5) / 1000) / (7 * DAY)) + 1);
     const ch = it ? { it, c, ok: done(c, it), p: pct(it), finish: c.type === "finish", start: c.type === "start", ago: Math.round((now() - finishedAt(it)) / (30 * DAY)) } : null;
@@ -1151,12 +1145,32 @@ const Bulletin = (() => {
         <div id="btNew" class="btm-ranks"><p class="hint">${S.conn.token ? "Stopping the presses…" : "Pair with your computer to see the catalogue's picks."}</p></div></section>
       <section class="btm-sec btm-tfa" id="btTfa" hidden></section>
       <section class="btm-sec btm-qotd" id="btQuote" hidden></section>
-      <section class="btm-sec btm-wrap"><header><small>ON YOUR SHELVES</small><h3>Still in the Wrapper</h3><p>Books, comics and films you own but have never opened</p></header>
-        ${wrapped.length ? `<div class="btm-velvet">${wrapped.map((x) => `<button class="btm-gem" data-item="${x.id}">${cover(x, false)}<span class="btm-seal">UNOPENED</span><b>${esc(W.title(x))}</b><small>${esc(by(x))}</small></button>`).join("")}</div>`
-          : `<p class="hint">You've opened everything on your shelves. Impressive.</p>`}</section>
+      <section class="btm-sec btm-wire"><header><small>THE WIRE · WORLD</small><h3>Breaking News</h3><p>The latest from BBC, Al Jazeera, NPR and the Guardian</p>
+        <button class="btm-refresh" data-bt-wire-refresh aria-label="Refresh the news">↻</button></header>
+        <div id="btWorld" class="btm-wires"><p class="hint">Warming up the wire…</p></div></section>
+      <section class="btm-sec btm-labs"><header><small>PRESS RELEASES · SCIENCE</small><h3>From the Labs</h3><p>Fresh from NASA, ESA, NIH, MIT, Harvard and Cambridge</p></header>
+        <div id="btLabs" class="btm-wires"><p class="hint">Opening the lab doors…</p></div></section>
     </div>`;
   }
-  function after() { paintPicks(); paintPotd(); }
+  function after() { paintPicks(); paintPotd(); paintWires(); }
+  /* the wires: world news and science press releases (fetched again after half an hour, or with ↻) */
+  let wires = null, wiresAt = 0;
+  const WIRE_NEW = 2 * 3600;                // newer than this: BREAKING (world) / JUST IN (labs)
+  async function paintWires(fresh = false) {
+    if (!wires || fresh || now() - wiresAt > 1800) {
+      const q = fresh ? "?fresh=1" : "";
+      const [w, sci] = await Promise.all([api("GET", "/sync/news/world" + q).catch(() => null), api("GET", "/sync/news/science" + q).catch(() => null)]);
+      const labs = sci && (sci.sections || []).find((s) => s.key === "labs");
+      if (w || labs) { wires = { world: (w && w.items || []).slice(0, 7), labs: (labs && labs.items || []).slice().sort((a, b) => (b.date || 0) - (a.date || 0)).slice(0, 5) }; wiresAt = now(); }
+    }
+    const age = (t) => { const s = now() - t; return s < 3600 ? Math.max(1, Math.round(s / 60)) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " days ago"; };
+    const list = (key, hot) => (wires && wires[key] || []).map((s, i) => `<button class="btm-wire-row${s.image ? "" : " noimg"}" data-bt-story="${key}:${i}">
+        <span class="btm-wtext"><span class="btm-wmeta">${s.date && now() - s.date < WIRE_NEW ? `<em class="btm-hot-tag">${hot}</em>` : ""}<small>${esc(s.source || "")}${s.date ? " · " + age(s.date) : ""}</small></span>
+        <b>${esc(s.title)}</b></span>${s.image ? `<span class="btm-wpic"><img loading="lazy" alt="" src="${esc(s.image)}" onerror="this.parentNode.remove()"></span>` : ""}</button>`).join("");
+    const fill = (id, key, hot, none) => { const b = $(id); if (b) b.innerHTML = list(key, hot) || `<p class="hint">${none}</p>`; };
+    fill("#btWorld", "world", "BREAKING", "The wire is quiet: the newsrooms couldn't be reached right now.");
+    fill("#btLabs", "labs", "JUST IN", "The labs couldn't be reached right now.");
+  }
   async function paintPotd() {
     if (potd === undefined) { potd = null; try { potd = await api("GET", "/sync/potd"); } catch (e) { potd = undefined; } }
     // Wikipedia's featured article and Wikiquote's quote of the day
@@ -1205,6 +1219,9 @@ const Bulletin = (() => {
   document.addEventListener("click", (e) => {
     const t = e.target;
     if (t.closest("[data-bt-reroll]")) { challenge(true); return render(); }
+    if (t.closest("[data-bt-wire-refresh]")) { $("#btWorld").innerHTML = `<p class="hint">Checking the wire…</p>`; return paintWires(true); }
+    const sto = t.closest("[data-bt-story]");
+    if (sto && wires) { const [k, i] = sto.dataset.btStory.split(":"); const s = wires[k] && wires[k][Number(i)]; if (s) return NewsTab.read(s); }
     const g = t.closest("[data-bt-go]"); if (g) { const it = S.items[g.dataset.btGo]; if (!it) return; return onPhone(it) ? Reader.start(it) : openSheet(it.id); }
     const w = t.closest("[data-bt-want]");
     if (w && picks) { e.stopPropagation(); return Catalogue.want(picks[Number(w.dataset.btWant)], w); }

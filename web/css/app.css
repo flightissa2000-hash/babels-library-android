@@ -306,6 +306,7 @@ textarea{font:inherit;color:var(--ink);background:var(--field-bg,var(--surface))
 .ct-views button.on{background:var(--ink);color:var(--surface);border-color:var(--ink)}
 .ct-views button i{font-style:normal;padding:0 5px;border-radius:8px;background:var(--accent);color:var(--accent-ink,#fff);font-size:.7rem}
 .ct-aisles{flex-wrap:nowrap;overflow-x:auto;margin-bottom:10px}
+.ct-restock{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px;font-size:.78rem;color:var(--ink-soft)}
 .ct-who{margin:0 0 10px;padding:10px 12px;border-radius:var(--radius-sm,10px);background:var(--accent);color:var(--accent-ink,#fff)}
 .ct-who b{display:block;font:400 1.3rem "Anton",var(--font-display);text-transform:uppercase}.ct-who small{opacity:.85}
 .ct-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px 12px}
@@ -908,17 +909,36 @@ html[data-nav=folders] .hw-swap{--tabs-w:46px}
 .btm-rinfo span{font-size:.72rem;opacity:.7}
 .bt-want{align-self:flex-start;margin-top:4px;padding:4px 11px;border-radius:999px;border:0;background:#ffd84d;color:#111;font:900 .72rem "Nunito",sans-serif}
 .bt-want.got{background:#36b37e;color:#fff}
-.btm-wrap{background:radial-gradient(ellipse at 50% 0,rgba(255,220,150,.16),transparent 55%),repeating-linear-gradient(90deg,rgba(255,255,255,.015) 0 2px,transparent 2px 5px),#2a0a1a}
-.btm-wrap header h3{color:#ffd9a0;text-shadow:0 0 30px rgba(255,200,120,.35)}
-.btm-velvet{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px 12px}
-.btm-gem{position:relative;display:flex;flex-direction:column;gap:4px;padding:0;border:0;background:none;color:inherit;text-align:left}
-.btm-gem .cov{display:block;width:100%;min-width:0;height:auto;aspect-ratio:2/3;border-radius:4px;overflow:hidden;box-shadow:0 14px 28px rgba(0,0,0,.8)}
-.btm-gem .cov img,.btm-hero .cov img{width:100%;height:100%;object-fit:cover}
+/* the wires: world news, then science press releases */
+.btm-sec header{position:relative}
+.btm-refresh{position:absolute;top:0;right:0;width:38px;height:38px;border-radius:50%;border:1.5px solid currentColor;background:transparent;color:inherit;font-size:1.1rem;opacity:.8}
+.btm-wire{background:repeating-linear-gradient(0deg,rgba(255,255,255,.025) 0 1px,transparent 1px 4px),linear-gradient(170deg,#1c0b0b,#0a0a0c 70%)}
+.btm-wire header h3{color:#fff;text-shadow:0 0 24px rgba(255,60,60,.45)}
+.btm-labs{background:radial-gradient(ellipse at 100% 0,rgba(90,200,255,.18),transparent 55%),linear-gradient(170deg,#06141f,#08080b 75%)}
+.btm-labs header h3{background:linear-gradient(90deg,#7ee3ff,#8affc1);-webkit-background-clip:text;background-clip:text;color:transparent}
+.btm-wires{display:grid;gap:4px}
+.btm-wire-row{display:grid;grid-template-columns:minmax(0,1fr) 84px;gap:12px;align-items:center;padding:12px 0;border:0;border-bottom:1px solid rgba(255,255,255,.12);background:none;color:inherit;text-align:left}
+.btm-wire-row.noimg{grid-template-columns:minmax(0,1fr)}
+.btm-wire-row:last-child{border-bottom:0}
+.btm-wtext{display:flex;flex-direction:column;gap:5px;min-width:0}
+.btm-wmeta{display:flex;align-items:center;gap:8px;min-width:0}
+.btm-wmeta small{font-size:.66rem;font-weight:800;letter-spacing:.04em;opacity:.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.btm-wire-row b{font-size:.95rem;line-height:1.25;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.btm-hot-tag{flex:none;padding:2px 6px;border-radius:3px;background:#e0222d;color:#fff;font:900 .55rem "Nunito",sans-serif;font-style:normal;letter-spacing:.14em;animation:btmBlink 1.6s ease-in-out infinite}
+.btm-labs .btm-hot-tag{background:#16a3c9}
+@keyframes btmBlink{50%{opacity:.55}}
+.btm-wpic{width:84px;height:62px;border-radius:6px;overflow:hidden;background:rgba(255,255,255,.06)}
+.btm-wpic img{width:100%;height:100%;object-fit:cover;display:block}
+[data-theme=wordtown] .btm-wire-row{border-bottom-color:rgba(34,48,74,.18)}
+[data-theme=gruvbox] .btm-wire,[data-theme=gruvbox] .btm-labs{background:#282828}
+[data-theme=gruvbox] .btm-wire header h3{color:#fb4934;text-shadow:none}
+[data-theme=gruvbox] .btm-labs header h3{background:none;color:#83a598;-webkit-text-fill-color:currentColor}
+[data-theme=gruvbox] .btm-hot-tag{background:#cc241d;border-radius:0}
+[data-theme=gruvbox] .btm-labs .btm-hot-tag{background:#458588}
+[data-theme=gruvbox] .btm-wire-row{border-bottom:1px dashed #504945}
+[data-theme=eink] .btm-hot-tag{animation:none;background:#000!important;color:#fff!important}
+.btm-hero .cov img{width:100%;height:100%;object-fit:cover}
 .btm-hero .cov{width:100%;height:100%;overflow:hidden}
-.btm-seal{position:absolute;top:8px;right:-6px;padding:3px 6px;transform:rotate(8deg);background:linear-gradient(135deg,#ffe8a3,#c9952e);color:#3a2205;font:900 .48rem "Nunito",sans-serif;letter-spacing:.14em}
-.btm-gem b{font:400 .9rem/1.1 "Anton",sans-serif;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.btm-gem{min-width:0}
-.btm-gem small{display:block;max-width:100%;font-size:.6rem;opacity:.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .btm-lab{background:linear-gradient(rgba(70,170,255,.08) 1px,transparent 1px) 0 0/22px 22px,linear-gradient(90deg,rgba(70,170,255,.08) 1px,transparent 1px) 0 0/22px 22px,#071526}
 .btm-lab header small{color:#5ec8ff;opacity:1;font-family:"IBM Plex Mono",monospace}
 .btm-lab header h3{font-family:"IBM Plex Mono",monospace;font-weight:700;text-transform:none;letter-spacing:-.02em;color:#e6f6ff}
@@ -947,13 +967,17 @@ html[data-nav=folders] .hw-swap{--tabs-w:46px}
 [data-theme=wordtown] .btm-sec{border-top:4px solid #22304a}
 [data-theme=wordtown] .btm-sec header h3{font-family:"Fredoka","Anton",sans-serif;font-weight:700;-webkit-text-fill-color:currentColor;background:none;text-shadow:3px 3px 0 #22304a}
 [data-theme=wordtown] .btm-hot{background:#ffc93c;color:#22304a}
-[data-theme=wordtown] .btm-hot header h3,[data-theme=wordtown] .btm-wrap header h3{color:#fff}
+[data-theme=wordtown] .btm-hot header h3{color:#fff}
 [data-theme=wordtown] .btm-num{-webkit-text-stroke:3px #22304a;color:#fff3d6}
-[data-theme=wordtown] .btm-pcov,[data-theme=wordtown] .btm-gem .cov{border:3px solid #22304a;box-shadow:5px 5px 0 #22304a}
+[data-theme=wordtown] .btm-pcov,[data-theme=wordtown] .btm-wpic{border:3px solid #22304a;box-shadow:5px 5px 0 #22304a}
 [data-theme=wordtown] .btm-rinfo small{color:#ff6b4a}
 [data-theme=wordtown] .bt-want{background:#fff;border:2px solid #22304a;color:#22304a}
-[data-theme=wordtown] .btm-wrap{background:#ff8fc0;color:#22304a}
-[data-theme=wordtown] .btm-seal{background:#ffc93c;border:2px solid #22304a;color:#22304a}
+[data-theme=wordtown] .btm-wire{background:#fff;color:#22304a}
+[data-theme=wordtown] .btm-wire header h3{color:#ff6b4a}
+[data-theme=wordtown] .btm-labs{background:#bfe7ff;color:#22304a}
+[data-theme=wordtown] .btm-labs header h3{color:#fff}
+[data-theme=wordtown] .btm-hot-tag{border:2px solid #22304a;background:#ff6b4a}
+[data-theme=wordtown] .btm-labs .btm-hot-tag{background:#4aa8ff}
 [data-theme=wordtown] .btm-lab{background:linear-gradient(rgba(34,48,74,.08) 1px,transparent 1px) 0 0/22px 22px,linear-gradient(90deg,rgba(34,48,74,.08) 1px,transparent 1px) 0 0/22px 22px,#fff;color:#22304a}
 [data-theme=wordtown] .btm-lab header small,[data-theme=wordtown] .btm-lab header h3{color:#4aa8ff;font-family:"Fredoka",sans-serif}
 [data-theme=wordtown] .btm-fig{background:#fff;color:#22304a;border:3px solid #22304a;border-radius:14px;box-shadow:4px 4px 0 #22304a}
@@ -985,9 +1009,6 @@ html[data-nav=folders] .hw-swap{--tabs-w:46px}
 [data-theme=gruvbox] .btm-num{-webkit-text-stroke:2.5px #d79921}
 [data-theme=gruvbox] .btm-rinfo small{color:#fe8019;font-family:"IBM Plex Mono",monospace}
 [data-theme=gruvbox] .bt-want{background:#b8bb26;color:#1d2021;border-radius:2px}
-[data-theme=gruvbox] .btm-wrap{background:radial-gradient(ellipse at 50% 0,rgba(250,189,47,.12),transparent 55%),#282828}
-[data-theme=gruvbox] .btm-wrap header h3{color:#fabd2f;text-shadow:none}
-[data-theme=gruvbox] .btm-seal{background:#d79921;color:#1d2021;font-family:"IBM Plex Mono",monospace}
 [data-theme=gruvbox] .btm-lab{background:linear-gradient(rgba(131,165,152,.08) 1px,transparent 1px) 0 0/22px 22px,linear-gradient(90deg,rgba(131,165,152,.08) 1px,transparent 1px) 0 0/22px 22px,#1d2021}
 [data-theme=gruvbox] .btm-lab header small,[data-theme=gruvbox] .btm-lab header h3,[data-theme=gruvbox] .btm-fignum{color:#8ec07c}
 [data-theme=gruvbox] .btm-fig{background:#282828;border-color:#504945;color:#ebdbb2}
