@@ -2204,3 +2204,28 @@ html[data-g-tab=catalogue] .top .sync-pill,html[data-g-tab=news] .top .sync-pill
 .hm-resume{box-sizing:border-box;min-width:0;max-width:100%}.hm-resume b{max-width:100%}
 
 .ss-info:empty{display:none}
+
+/* ---------------------------------------------------------------- Settings: a menu of sections, each on its own page */
+.set-title{display:flex;align-items:center;gap:10px;margin:4px 2px 14px;font-size:1.35rem}
+.set-title i{font-style:normal}
+.set-main{margin-top:10px}
+.set-menu{display:flex;flex-direction:column;border-radius:var(--radius-lg,18px);overflow:hidden;background:var(--surface);border:var(--card-border,2px solid var(--line));margin-bottom:16px}
+.set-row{display:flex;align-items:center;gap:14px;width:100%;padding:14px 16px;border:0;border-bottom:1px solid color-mix(in srgb,var(--line) 30%,transparent);background:none;color:var(--ink);text-align:left}
+.set-row:last-child{border-bottom:0}
+.set-row:active{background:color-mix(in srgb,var(--ink) 8%,transparent)}
+.set-row>i{flex:none;display:grid;place-items:center;width:38px;height:38px;border-radius:11px;background:color-mix(in srgb,var(--accent) 18%,transparent);font-style:normal;font-size:1.2rem}
+.set-row>span{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.set-row b{font-size:1rem}
+.set-row small{font-size:.8rem;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.set-row>em{font-style:normal;font-size:1.4rem;color:var(--ink-soft)}
+.set-row.warn>i{background:color-mix(in srgb,#e5484d 22%,transparent)}
+.set-row.warn small{color:#e5484d}
+.set-top{display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin-top:6px}
+.set-back{border:0;background:none;color:var(--accent);font:700 .95rem var(--font-ui,inherit);padding:6px 2px}
+.set-grp>h3{font-size:.78rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:8px}
+[data-theme=galaxy] .set-menu{background:rgba(10,14,40,.55);border-color:rgba(150,170,255,.22);backdrop-filter:blur(8px)}
+[data-theme=gruvbox] .set-menu,[data-theme=gruvbox] .set-row>i{border-radius:6px}
+[data-theme=eink] .set-row>i{background:none;border:1px solid #000}.set-top + .set-grp:last-child > h3{display:none}
+.set-grp .check{display:grid;grid-template-columns:auto 1fr;column-gap:10px;row-gap:2px;align-items:start}
+.set-grp .check>input{margin-top:3px}
+.set-grp .check>small,.set-grp .check>.hint{grid-column:2;display:block}

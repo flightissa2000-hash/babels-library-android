@@ -259,6 +259,7 @@ window.Native = {
   onPause() { if (Reader.open) Reader.saveNow(); saveLibrary(); },
   onBack() {
     if (window.PageKeys && PageKeys.cancel()) return true;
+    if (S.tab === "settings" && S.setPane && S.conn.token && $("#sheet").hidden && !Reader.open) { S.setPane = null; render(); return true; }
     if (Reader.open) return Reader.back();
     if (!$("#sheet").hidden) { closeSheet(); return true; }
     if (S.tab !== "home") { setTab("home"); return true; }
@@ -1668,10 +1669,25 @@ setInterval(paintPill, 30000);
 
 /* ---------------------------------------------------------------- settings and pairing */
 let found = null;
+document.addEventListener("click", (e) => {
+  const t = e.target.closest?.("[data-setp]");
+  if (!t || S.tab !== "settings") return;
+  S.setPane = t.dataset.setp || null;
+  if (!S.setPane && !S.conn.token) S.setPane = "menu";      // (unpaired: the back arrow still shows the menu)
+  render(); window.scrollTo(0, 0);
+});
 function renderSettings(v) {
   const paired = !!S.conn.token;
-  v.innerHTML = `
-    <div class="panel"><h3>Your computer</h3>
+  if (!paired && !S.setPane) S.setPane = "computer";        // (not paired yet: straight to pairing)
+  if (S.setPane === "menu") S.setPane = null;
+  const theme = (window.THEMES || {})[S.eink ? "eink" : S.themeChoice === "auto" ? S.theme : S.themeChoice];
+  let pwN = 0, nLim = 0;
+  try { pwN = !WEB && A && A.passwordCount ? A.passwordCount() : 0; } catch (e) {}
+  try { nLim = !WEB && A && A.siteLimits ? Object.keys(JSON.parse(A.siteLimits()).limits || {}).length : 0; } catch (e) {}
+  // the sections: [key, icon, title, one-line summary, html] (a section with no html isn't there on this device)
+  const SECTIONS = [
+    ["computer", "💻", "Your computer", paired ? `${S.conn.pc || "Computer"} · ${S.lastSync ? "synced " + ago(S.lastSync) : "not synced yet"}` : "Not paired: tap to pair", () => `
+    <div class="panel set-grp"><h3>Your computer</h3>
       ${paired ? `<p><b>${esc(S.conn.pc || "Computer")}</b></p>
         <p class="hint">${S.syncError && S.syncError !== "offline" ? esc(S.syncError) : S.route === "wifi" ? "Connected over Wi-Fi." : S.route === "remote" ? "Connected from away (through the internet)." : "Not reachable right now: the computer is off, or you're away and “Reach this library from anywhere” is off on it."}
         ${S.lastSync ? ` Last synced ${ago(S.lastSync)}.` : ""}</p>
@@ -1687,8 +1703,9 @@ function renderSettings(v) {
         <div class="field"><label for="addr">Computer address</label><input id="addr" inputmode="url" placeholder="192.168.1.20" value="${esc(S.pairAddr || "")}"></div>
         <div class="field"><label for="code">Pairing code</label><input id="code" class="code" inputmode="numeric" maxlength="7" placeholder="000 000"></div>
         <button class="btn primary" id="pairBtn">Pair</button>`}
-    </div>
-    <div class="panel"><h3>Profiles</h3>
+    </div>`],
+    ["profiles", "👤", "Profiles", `${Prof.me().face} ${Prof.me().name}${Prof.list.length > 1 ? ` · ${Prof.list.length} profiles` : ""}`, () => `
+    <div class="panel set-grp"><h3>Profiles</h3>
       <p class="hint">${Prof.server ? "The library's profiles (kept on the computer): each has its own place in every book and film, its own notes and journal, and doesn't see what the others hid. Switching needs the computer." : `Everyone who uses this phone can have their own place in every book and film. <b>${esc(Prof.list[0].name)}</b> is kept in step with the computer; the others keep their progress on this phone only.`}</p>
       <div class="prof-list">${Prof.list.map((p) => `<div class="prof-row ${p.id === Prof.cur ? "on" : ""}">
         <button class="prof-face" data-prof-face="${p.id}" aria-label="Change the picture">${p.face}</button>
@@ -1697,42 +1714,9 @@ function renderSettings(v) {
         ${p.id === Prof.cur ? `<span class="badge">In use</span>` : `<button class="btn sm" data-prof-use="${p.id}">Use</button>`}
         ${p.id !== "main" && !Prof.server ? `<button class="btn sm danger" data-prof-del="${p.id}" aria-label="Remove">✕</button>` : ""}</div>`).join("")}</div>
       ${Prof.server ? `<button class="btn" data-prof-pin>🔑 ${Prof.me().locked ? `Change or remove ${esc(Prof.me().name)}'s PIN` : `Give ${esc(Prof.me().name)} a PIN`}</button>` : ""}
-      <form class="prof-add" id="profAdd"><input id="profNew" maxlength="24" placeholder="A name" autocomplete="off"><button class="btn">＋ Add a profile</button></form></div>
-    <div class="panel"><h3>Files on this phone</h3><p class="hint">${Object.keys(S.files).length} files · ${A ? fmtSize(A.freeSpace()) : "?"} free</p>
-      <div class="btns"><button class="btn" id="myFiles">See what's on the phone</button></div>
-      ${A && A.scanFolder ? `<p class="hint">Already have books, comics, music or films from your library on this ${WEB ? "device (in Files)" : "phone (in Downloads, say)"}? ${WEB ? "Pick them" : "Pick the folder"} and the ones that are in your library are added here, without downloading them again. ${WEB ? "" : "The originals stay where they are."}</p>
-        <div class="btns">${WEB ? `<button class="btn" data-scan="new">🔍 Find my files on this device</button>` : `<button class="btn" data-scan="pick">🔍 Pick files…</button><button class="btn" data-scan="new">📁 Look through a folder…</button>${A.scanFolderKnown && A.scanFolderKnown() ? `<button class="btn" data-scan="again">↻ Look again</button>` : ""}`}</div>
-        ${WEB ? "" : `<p class="hint">Android doesn't let apps look through all of Downloads: pick the files there (hold one to choose several), or a folder inside it.</p>`}
-        <p class="hint" id="scanState"></p>` : ""}</div>
-    <div class="panel"><h3>Files</h3>
-      <label class="check"><input type="checkbox" id="autoGet" ${S.autoGet ? "checked" : ""}> Fetch files sent from the computer by itself (Wi-Fi or mobile data)</label></div>
-    <div class="panel"><h3>News</h3>
-      <label class="check"><input type="checkbox" id="newsAlerts" ${A && A.newsAlerts && A.newsAlerts() ? "checked" : ""}> Notify me when a new event turns up in the News “Events” section</label>
-      <p class="hint">${WEB ? "Works when this app is on your Home Screen (in Safari: Share → Add to Home Screen, then open it from there). The computer looks every few hours and sends the notification; tap it to share or open the event." : "The computer looks every few hours; the phone checks in about once an hour and needs to reach the computer (home Wi-Fi, or “Reach this library from anywhere”). Each notification has Share and Open."}</p></div>
-    ${window.PageKeys ? PageKeys.panel() : ""}
-    ${WEB || !A || !A.passwordCount ? "" : (() => { const pwN = A.passwordCount();
-      return `<div class="panel"><h3>🔑 Passwords</h3>
-        <p class="hint">${pwN ? `${pwN} saved on this phone, encrypted in its secure keystore. On a site you have one for, 🔑 on the browser's bar fills it in.` : "Import an export from Chrome, Firefox, Edge, Bitwarden, 1Password or LastPass (a .csv file). They're encrypted in this phone's secure keystore, for the browser's 🔑."}</p>
-        <div class="btns"><button class="btn" id="pwImport" type="button">Import passwords…</button>${pwN ? `<button class="btn danger" id="pwClear" type="button">Remove all</button>` : ""}</div>
-        <p class="hint">Your phone's own password manager (Google, Samsung Pass…) works in the browser too.</p></div>`; })()}
-    ${WEB || !A || !A.siteLimits ? "" : (() => {
-      let sl = { limits: {}, used: {} };
-      try { sl = JSON.parse(A.siteLimits()); } catch (e) {}
-      const fmt = (m) => m >= 60 && m % 60 === 0 ? `${m / 60} h` : m > 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
-      const rows = Object.entries(sl.limits || {}).map(([d, m]) => { const u = Math.round(((sl.used || {})[d] || 0) / 60);
-        return `<div class="row" style="align-items:center;gap:8px;margin:6px 0"><b style="flex:1">${esc(d)}</b><span class="hint">${fmt(u)} of ${fmt(m)} today</span><button class="btn" data-limit-off="${esc(d)}" aria-label="Remove the limit">✕</button></div>`; }).join("");
-      return `<div class="panel"><h3>Browser time limits</h3>
-        ${rows || `<p class="hint">No limits yet.</p>`}
-        <input id="limSite" placeholder="Website, like youtube.com" style="display:block;width:100%;box-sizing:border-box;margin-top:8px" autocapitalize="off" autocorrect="off" inputmode="url">
-        <div class="row" style="gap:8px;align-items:center;margin-top:8px">
-          <select id="limMin" style="flex:1">${[15, 30, 45, 60, 90, 120, 180].map((m) => `<option value="${m}" ${m === 60 ? "selected" : ""}>${fmt(m)}</option>`).join("")}</select>
-          <button class="btn primary" data-limit-add>Add</button></div>
-        <p class="hint">A day's time on a website in the browser: it counts while the site is on screen or playing, and when it runs out the site closes until midnight. These are ${esc(Prof.me().name)}'s limits: each profile has its own${Prof.server ? ", and they follow it to its other phones" : ""}.</p></div>`; })()}
-    <div class="panel"><h3>The Bulletin</h3>
-      <div class="chips"><b class="chip-lbl">Challenge lasts</b>${[["week", "A week"], ["month", "A month"]].map(([k, n]) => `<button data-bperiod="${k}" class="${(S.bulletinPeriod || "week") === k ? "on" : ""}">${n}</button>`).join("")}</div>
-      <p class="hint">For this profile only, here and on the computer. A month starts on the 1st, a week on Monday.</p></div>
-    ${window.AddOns ? AddOns.settingsPanel() : ""}
-    <div class="panel"><h3>Look</h3>
+      <form class="prof-add" id="profAdd"><input id="profNew" maxlength="24" placeholder="A name" autocomplete="off"><button class="btn">＋ Add a profile</button></form></div>`],
+    ["look", "🎨", "Look", `${S.themeChoice === "auto" && !S.eink ? "Same as the computer" : theme ? theme.name : "Theme"} · ${(NAVS.find((n) => n[0] === S.nav) || NAVS[0])[1]}`, () => `
+    <div class="panel set-grp"><h3>Look</h3>
       <label class="check"><input type="checkbox" id="einkOn" ${S.eink ? "checked" : ""}> E-reader mode <small class="hint">(for e-ink screens: switches to the E-reader theme, with no animations or shadows)</small></label>
       <div class="field"><label for="themeSel">Theme</label><select id="themeSel"><option value="auto">Same as the computer</option>${Object.entries(window.THEMES || {}).map(([k, t]) => `<option value="${k}">${esc(t.name)}</option>`).join("")}</select></div>
       <h4 class="pick-h">Getting around <small>how you switch between Home, Library, Catalogue…</small></h4>
@@ -1742,7 +1726,51 @@ function renderSettings(v) {
       <div class="chips"><b class="chip-lbl">Size</b>${[[0, "Auto"], [1, "100%"], [1.25, "125%"], [1.5, "150%"], [1.75, "175%"], [2, "200%"]].map(([k, n]) => `<button data-dexscale="${k}" class="${(+S.dexScale || 0) === k ? "on" : ""}">${n}</button>`).join("")}</div>
       <p class="hint">${(() => { const [w, h] = viewSize(); let info = ""; try { info = A.screenInfo ? A.screenInfo() : ""; } catch (e) {} return `This window: ${w} × ${h}. ${isDex() ? `Desktop layout on, drawn at ${Math.round((fitDex.k || 1) * 100)}%.` : "Phone layout."}${info ? ` <small>(${esc(info)})</small>` : ""}`; })()}</p>`}
       <h4 class="pick-h">Journal style</h4>
-      <div class="pick-grid three">${JSTYLES.map(([k, n, d]) => `<button class="pick ${S.jstyle === k ? "on" : ""}" data-jstyle-pick="${k}"><i class="pk pk-j-${k}"></i><b>${n}</b><small>${d}</small></button>`).join("")}</div></div>
+      <div class="pick-grid three">${JSTYLES.map(([k, n, d]) => `<button class="pick ${S.jstyle === k ? "on" : ""}" data-jstyle-pick="${k}"><i class="pk pk-j-${k}"></i><b>${n}</b><small>${d}</small></button>`).join("")}</div></div>`],
+    ["reading", "📖", "Reading & news", `Bulletin challenge, page-turn buttons, news alerts`, () => `
+    <div class="panel set-grp"><h3>The Bulletin</h3>
+      <div class="chips"><b class="chip-lbl">Challenge lasts</b>${[["week", "A week"], ["month", "A month"]].map(([k, n]) => `<button data-bperiod="${k}" class="${(S.bulletinPeriod || "week") === k ? "on" : ""}">${n}</button>`).join("")}</div>
+      <p class="hint">For this profile only, here and on the computer. A month starts on the 1st, a week on Monday.</p></div>
+    ${window.PageKeys ? PageKeys.panel().replace('<div class="panel" id="pkPanel">', '<div class="panel set-grp" id="pkPanel">') : ""}
+    <div class="panel set-grp"><h3>News</h3>
+      <label class="check"><input type="checkbox" id="newsAlerts" ${A && A.newsAlerts && A.newsAlerts() ? "checked" : ""}> Notify me when a new event turns up in the News “Events” section</label>
+      <p class="hint">${WEB ? "Works when this app is on your Home Screen (in Safari: Share → Add to Home Screen, then open it from there). The computer looks every few hours and sends the notification; tap it to share or open the event." : "The computer looks every few hours; the phone checks in about once an hour and needs to reach the computer (home Wi-Fi, or “Reach this library from anywhere”). Each notification has Share and Open."}</p></div>`],
+    ["files", "📁", "Files", `${Object.keys(S.files).length} files on this ${WEB ? "device" : "phone"}${A && A.freeSpace ? ` · ${fmtSize(A.freeSpace())} free` : ""}`, () => `
+    <div class="panel set-grp"><h3>Files on this phone</h3><p class="hint">${Object.keys(S.files).length} files · ${A ? fmtSize(A.freeSpace()) : "?"} free</p>
+      <div class="btns"><button class="btn" id="myFiles">See what's on the phone</button></div>
+      ${A && A.scanFolder ? `<p class="hint">Already have books, comics, music or films from your library on this ${WEB ? "device (in Files)" : "phone (in Downloads, say)"}? ${WEB ? "Pick them" : "Pick the folder"} and the ones that are in your library are added here, without downloading them again. ${WEB ? "" : "The originals stay where they are."}</p>
+        <div class="btns">${WEB ? `<button class="btn" data-scan="new">🔍 Find my files on this device</button>` : `<button class="btn" data-scan="pick">🔍 Pick files…</button><button class="btn" data-scan="new">📁 Look through a folder…</button>${A.scanFolderKnown && A.scanFolderKnown() ? `<button class="btn" data-scan="again">↻ Look again</button>` : ""}`}</div>
+        ${WEB ? "" : `<p class="hint">Android doesn't let apps look through all of Downloads: pick the files there (hold one to choose several), or a folder inside it.</p>`}
+        <p class="hint" id="scanState"></p>` : ""}</div>
+    <div class="panel set-grp"><h3>Files</h3>
+      <label class="check"><input type="checkbox" id="autoGet" ${S.autoGet ? "checked" : ""}> Fetch files sent from the computer by itself (Wi-Fi or mobile data)</label></div>`],
+    ["browser", "🌐", "Browser", `${pwN} saved password${pwN === 1 ? "" : "s"} · ${nLim ? nLim + " time limit" + (nLim === 1 ? "" : "s") : "no time limits"}`, WEB || !A || !A.siteLimits ? null : () => `
+    ${WEB || !A || !A.passwordCount ? "" : (() => { const pwN = A.passwordCount();
+      return `<div class="panel set-grp"><h3>🔑 Passwords</h3>
+        <p class="hint">${pwN ? `${pwN} saved on this phone, encrypted in its secure keystore. On a site you have one for, 🔑 on the browser's bar fills it in.` : "Import an export from Chrome, Firefox, Edge, Bitwarden, 1Password or LastPass (a .csv file). They're encrypted in this phone's secure keystore, for the browser's 🔑."}</p>
+        <div class="btns"><button class="btn" id="pwImport" type="button">Import passwords…</button>${pwN ? `<button class="btn danger" id="pwClear" type="button">Remove all</button>` : ""}</div>
+        <p class="hint">Your phone's own password manager (Google, Samsung Pass…) works in the browser too.</p></div>`; })()}
+    ${WEB || !A || !A.siteLimits ? "" : (() => {
+      let sl = { limits: {}, used: {} };
+      try { sl = JSON.parse(A.siteLimits()); } catch (e) {}
+      const fmt = (m) => m >= 60 && m % 60 === 0 ? `${m / 60} h` : m > 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
+      const rows = Object.entries(sl.limits || {}).map(([d, m]) => { const u = Math.round(((sl.used || {})[d] || 0) / 60);
+        return `<div class="row" style="align-items:center;gap:8px;margin:6px 0"><b style="flex:1">${esc(d)}</b><span class="hint">${fmt(u)} of ${fmt(m)} today</span><button class="btn" data-limit-off="${esc(d)}" aria-label="Remove the limit">✕</button></div>`; }).join("");
+      return `<div class="panel set-grp"><h3>Browser time limits</h3>
+        ${rows || `<p class="hint">No limits yet.</p>`}
+        <input id="limSite" placeholder="Website, like youtube.com" style="display:block;width:100%;box-sizing:border-box;margin-top:8px" autocapitalize="off" autocorrect="off" inputmode="url">
+        <div class="row" style="gap:8px;align-items:center;margin-top:8px">
+          <select id="limMin" style="flex:1">${[15, 30, 45, 60, 90, 120, 180].map((m) => `<option value="${m}" ${m === 60 ? "selected" : ""}>${fmt(m)}</option>`).join("")}</select>
+          <button class="btn primary" data-limit-add>Add</button></div>
+        <p class="hint">A day's time on a website in the browser: it counts while the site is on screen or playing, and when it runs out the site closes until midnight. These are ${esc(Prof.me().name)}'s limits: each profile has its own${Prof.server ? ", and they follow it to its other phones" : ""}.</p></div>`; })()}`],
+    ["phone", "📱", "This phone", "Home screen, default browser, sleep screen", window.AddOns ? () => AddOns.settingsPanel().replace('<div class="panel">', '<div class="panel set-grp">') : null],
+  ].filter((x) => x[4]);
+  const open = SECTIONS.find((x) => x[0] === S.setPane);
+  if (!open) S.setPane = null;
+  v.innerHTML = open
+    ? `<div class="set-top"><button class="set-back" data-setp="" type="button" aria-label="Back to Settings">‹ Settings</button><h2 class="set-title"><i>${open[1]}</i>${esc(open[2])}</h2></div>${open[4]()}`
+    : `<h2 class="set-title set-main">Settings</h2>
+      <div class="set-menu">${SECTIONS.map(([k, ic, t, sum]) => `<button class="set-row${k === "computer" && !paired ? " warn" : ""}" data-setp="${k}" type="button"><i>${ic}</i><span><b>${esc(t)}</b><small>${esc(sum)}</small></span><em>›</em></button>`).join("")}</div>
     <p class="hint" style="text-align:center">Babel's Library for ${WEB ? "iPhone & iPad" : "Android"} 1.0${S.ops.length ? ` · ${S.ops.length} change${S.ops.length === 1 ? "" : "s"} waiting to send` : ""}</p>`;
   if ($("#themeSel")) $("#themeSel").value = S.eink ? "eink" : S.themeChoice;
 }
