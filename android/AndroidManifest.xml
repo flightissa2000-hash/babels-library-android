@@ -20,11 +20,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- dictation into phone notes (asked for the first time you dictate) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- the quick panel's brightness slider for the whole phone (you allow it on Android's own page first) -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
 
     <!-- Android 11+: lets the app see the phone's speech recognition service -->
     <queries>
         <intent>
             <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <!-- the Add-ons tab lists the phone's other apps (only the ones you can open, like any home screen) -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
         </intent>
     </queries>
 
@@ -46,6 +53,20 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- can be picked as the phone's home screen (the Bulletin, with your apps on the Add-ons tab) -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- can be picked as the phone's browser: links from other apps open on the Browser tab -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
             </intent-filter>
             <!-- "Share → Babel's Library" in other apps: the file goes to the computer's library -->
             <intent-filter android:label="Add to Babel's Library">
@@ -91,6 +112,27 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_info" />
         </receiver>
+        <!-- the sleep screen as Android's screen saver (while charging or docked) -->
+        <service
+            android:name=".SleepDream"
+            android:exported="true"
+            android:label="Babel's Library"
+            android:permission="android.permission.BIND_DREAM_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.dreams.DreamService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
+        <!-- other apps' notifications in the quick panel (you switch it on: Settings, Notification access) -->
+        <service
+            android:name=".BabelNotifs"
+            android:exported="true"
+            android:label="Babel's Library"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
         <!-- hands a downloaded file to another app (video player, comic reader) for formats this app can't show -->
         <provider
             android:name=".FilesProvider"

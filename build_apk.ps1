@@ -30,6 +30,13 @@ $web = "$out\assets\web"
 Copy-Item -Recurse "$root\web" $web
 Copy-Item "$desk\css\themes.css" "$web\css\themes.css"
 Copy-Item "$desk\js\themes.js" "$web\js\themes.js"
+# the Galaxy theme's palette and the star chart are shared with the computer too
+Copy-Item "$desk\css\galaxy.css" "$web\css\galaxy.css"
+Copy-Item "$desk\css\sky.css" "$web\css\sky.css"
+Copy-Item "$desk\js\sky.js" "$web\js\sky.js"
+New-Item -ItemType Directory -Force "$web\sky" | Out-Null
+Copy-Item "$desk\sky\sky.json" "$web\sky\sky.json"
+Copy-Item "$desk\sky\milkyway.jpg" "$web\sky\milkyway.jpg"
 # the browser's YouTube ad remover is the computer's own (adblock.YOUTUBE_JS)
 Run $py -c "import sys; sys.path.insert(0, r'$desk\..'); import adblock; open(r'$web\yt_adblock.js', 'w', encoding='utf-8').write(adblock.YOUTUBE_JS)"
 New-Item -ItemType Directory -Force "$web\vendor\fonts" | Out-Null

@@ -70,6 +70,33 @@ public class MainActivity extends Activity {
         for (String[] p : m) MIME.put(p[0], p[1]);
     }
 
+    /** why this looks like Samsung DeX (or another desktop mode), or null: the phone's own flag, a desk UI mode, or the
+     *  app running on a second display (a monitor) */
+    String dexMode() {
+        android.content.res.Configuration c = getResources().getConfiguration();
+        try {
+            Class<?> k = c.getClass();
+            if (k.getField("SEM_DESKTOP_MODE_ENABLED").getInt(k) == k.getField("semDesktopModeEnabled").getInt(c)) return "Samsung desktop mode";
+        } catch (Exception ignored) { }
+        try {
+            Object m = getSystemService("desktopmode");
+            if (m != null) {
+                Object st = m.getClass().getMethod("getDesktopModeState").invoke(m);
+                Object en = st.getClass().getMethod("getEnabled").invoke(st);
+                if (en instanceof Integer && (Integer) en == 4) return "Samsung DeX";
+            }
+        } catch (Exception ignored) { }
+        if ((c.uiMode & android.content.res.Configuration.UI_MODE_TYPE_MASK) == android.content.res.Configuration.UI_MODE_TYPE_DESK) return "desk mode";
+        if (displayId() != android.view.Display.DEFAULT_DISPLAY) return "on a second screen";
+        return null;
+    }
+    int displayId() {
+        try {
+            android.view.Display d = android.os.Build.VERSION.SDK_INT >= 30 ? getDisplay() : getWindowManager().getDefaultDisplay();
+            return d == null ? 0 : d.getDisplayId();
+        } catch (Exception e) { return 0; }
+    }
+    private volatile float pageZoom = 1f;      // the page's own scale (DeX: bigger on a big window)
     private WebView web;
     private static java.lang.ref.WeakReference<MainActivity> live = new java.lang.ref.WeakReference<>(null);
     private volatile boolean appPlaying = false;
@@ -85,6 +112,8 @@ public class MainActivity extends Activity {
     private LocalServer media;
     private android.widget.FrameLayout screen;          // the app's page, with the browser laid over its Browser tab
     private BrowserPanel browser;                        // the browser's one tab: kept while you're elsewhere in the app
+    private BrowserPanel mailPanel;                      // the Mail tab's own browser (Gmail), apart from the Browser tab's
+    private Widgets widgets;                             // other apps' widgets on the Mail tab (Gmail's inbox)
     private android.widget.TextView nub;                // the orange tab over a full-width browser (the app's tabs hidden)
 
     static File libraryDir(Context c) {
@@ -116,6 +145,10 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setAllowFileAccess(false);
         s.setTextZoom(100);
+        // (the page's viewport tag decides its width: on a phone the screen's, on a DeX monitor a scaled-up page)
+        s.setUseWideViewPort(true);
+        s.setLoadWithOverviewMode(true);
+        s.setSupportZoom(false);
         web.setOverScrollMode(View.OVER_SCROLL_NEVER);
         web.setBackgroundColor(0xFFBFE7FF);
         web.addJavascriptInterface(new Bridge(), "Android");
@@ -134,6 +167,17 @@ public class MainActivity extends Activity {
                     if (p.equals("/catcover")) return catCover(u.getEncodedQuery());
                     if (p.startsWith("/net/")) return net(p.substring(4) + (u.getEncodedQuery() != null ? "?" + u.getEncodedQuery() : ""), req.getRequestHeaders());
                     if (p.startsWith("/comic/")) return comic(p.substring(7));
+                    if (p.equals("/appicon")) return SleepDream.appIcon(MainActivity.this, u);
+                    if (p.equals("/pkgicon")) {
+                        try { return new WebResourceResponse("image/png", null, new ByteArrayInputStream(Launcher.pkgIcon(MainActivity.this, u.getQueryParameter("p")))); }
+                        catch (Exception x) { return notFound(); }
+                    }
+                    if (p.equals("/widgetpreview")) {
+                        byte[] png = widgets.preview(u.getQueryParameter("p"), u.getQueryParameter("c"));
+                        return png == null ? notFound() : new WebResourceResponse("image/png", null, new ByteArrayInputStream(png));
+                    }
+                    WebResourceResponse sl = SleepDream.serve(MainActivity.this, p);       // (the sleep screen's data)
+                    if (sl != null) return sl;
                 } catch (Exception e) {
                     return notFound();
                 }
@@ -152,6 +196,10 @@ public class MainActivity extends Activity {
         screen = new android.widget.FrameLayout(this);
         screen.addView(web, new android.widget.FrameLayout.LayoutParams(-1, -1));
         setContentView(screen);
+        widgets = new Widgets(this);
+        screen.addView(widgets.dock, new android.widget.FrameLayout.LayoutParams(1, 1));
+        widgets.onChanged = () -> js("window.Native && Native.widgetsChanged && Native.widgetsChanged()");
+        widgets.rebuild();
         web.loadUrl(START);
         shared(getIntent());
         Intent first = getIntent();
@@ -175,10 +223,12 @@ public class MainActivity extends Activity {
         js("window.setTab && setTab('browser')");
     }
     /** where the page's Browser tab has room for it (CSS pixels, from the page) */
-    private void placeBrowser(String json) {
+    private void placeBrowser(String json) { placePanel(browser, json); }
+    private void placePanel(BrowserPanel browser, String json) {
+        if (browser == null) return;
         try {
             JSONObject r = new JSONObject(json);
-            float d = getResources().getDisplayMetrics().density;
+            float d = getResources().getDisplayMetrics().density * pageZoom;
             android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(Math.max(1, Math.round((float) r.optDouble("w") * d)), Math.max(1, Math.round((float) r.optDouble("h") * d)));
             lp.leftMargin = Math.round((float) r.optDouble("x") * d);
             lp.topMargin = Math.round((float) r.optDouble("y") * d);
@@ -248,6 +298,26 @@ public class MainActivity extends Activity {
     }
     private void hideNub() { if (nub != null) nub.setVisibility(View.GONE); }
 
+    // ------------------------------------------------------------------ the Mail tab: Gmail in a browser of its own
+    private boolean ensureMail(String url) {
+        if (mailPanel != null) return false;
+        mailPanel = new BrowserPanel(this, screen, url, null, true);
+        mailPanel.onClosed = this::closeMail;
+        View v = mailPanel.view();
+        v.setVisibility(View.INVISIBLE);
+        screen.addView(v, new android.widget.FrameLayout.LayoutParams(1, 1));
+        if (nub != null) nub.bringToFront();
+        return true;
+    }
+    private void closeMail() {
+        hideNub();
+        if (mailPanel == null) return;
+        mailPanel.destroy();
+        mailPanel = null;
+        js("window.Native && Native.mailClosed && Native.mailClosed()");
+    }
+    private boolean mailShowing() { return mailPanel != null && mailPanel.view().getVisibility() == View.VISIBLE; }
+
     /** ✕ on the browser's last page: the tab is closed; the Browser tab shows its start page */
     private void closeBrowser() {
         hideNub();
@@ -264,6 +334,18 @@ public class MainActivity extends Activity {
         try { JSONObject o = new JSONObject(json); look = o.optString("theme") + "/" + o.optString("layout"); } catch (Exception ignored) { }
         boolean changed = !browserLook.isEmpty() && !look.equals(browserLook);
         browserLook = look;
+        if (changed && mailPanel != null) {          // (the Mail tab's browser gets the new look too)
+            Bundle ms = mailPanel.save();
+            boolean mshown = mailPanel.view().getVisibility() == View.VISIBLE;
+            android.view.ViewGroup.LayoutParams mlp = mailPanel.view().getLayoutParams();
+            mailPanel.destroy();
+            mailPanel = new BrowserPanel(this, screen, "", ms, true);
+            mailPanel.onClosed = this::closeMail;
+            mailPanel.view().setVisibility(mshown ? View.VISIBLE : View.INVISIBLE);
+            mailPanel.topInset(browserCut);
+            screen.addView(mailPanel.view(), mlp);
+            if (nub != null) nub.bringToFront();
+        }
         if (!changed || browser == null) return;
         Bundle st = browser.save();
         boolean shown = browser.view().getVisibility() == View.VISIBLE;
@@ -279,6 +361,16 @@ public class MainActivity extends Activity {
     /** from a notification: a News event's page, or back to what's playing in the browser */
     private void fromNotification(Intent i) {
         if (i == null) return;
+        // Babel as the home screen: the Home button brings up the Bulletin
+        if (Intent.ACTION_MAIN.equals(i.getAction()) && i.hasCategory(Intent.CATEGORY_HOME)) {
+            js("window.Native && Native.homeButton && Native.homeButton()");
+            return;
+        }
+        // Babel as the phone's browser: a link from another app opens on the Browser tab (Back returns to that app)
+        if (Intent.ACTION_VIEW.equals(i.getAction()) && i.getData() != null) {
+            String sc = i.getData().getScheme() == null ? "" : i.getData().getScheme().toLowerCase();
+            if (sc.equals("http") || sc.equals("https")) { fromOtherApp = true; openBrowserNow(i.getDataString()); return; }
+        }
         String url = i.getStringExtra(BrowserPanel.EXTRA_URL);
         if (url != null && !url.isEmpty()) openBrowserNow(url);
         else if (i.getBooleanExtra("browser", false)) js("window.setTab && setTab('browser')");
@@ -303,6 +395,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
+        setIntent(i);
         shared(i);
         fromNotification(i);
     }
@@ -330,6 +423,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == Launcher.REQ_ROLE) { js("window.Native && Native.roleChanged && Native.roleChanged()"); return; }
+        if (widgets != null && widgets.result(req, res)) return;
         if (req == REQ_PASSWORDS) {          // a password export picked to import: read it, encrypt it, then report back
             if (res != RESULT_OK || data == null || data.getData() == null) { js("window.Native && Native.pwImported && Native.pwImported(null)"); return; }
             final Uri u = data.getData();
@@ -514,16 +609,52 @@ public class MainActivity extends Activity {
     }
 
     /** A catalogue cover (a book that isn't in the library), through the computer, which fetches and keeps them. */
+    /** catalogue covers kept on the phone (a WebView never caches pictures the app hands it itself): a cover seen once
+     *  shows at once next time, without asking the computer again. Kept 30 days; the folder is trimmed past 60 MB. */
+    private java.io.File coverFile(String query) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-1");
+            StringBuilder sb = new StringBuilder();
+            for (byte x : md.digest(query.getBytes("UTF-8"))) sb.append(String.format("%02x", x));
+            java.io.File dir = new java.io.File(getCacheDir(), "catcovers");
+            if (!dir.isDirectory() && !dir.mkdirs()) return null;
+            return new java.io.File(dir, sb + ".jpg");
+        } catch (Exception e) { return null; }
+    }
+    private WebResourceResponse coverResponse(byte[] body) {
+        Map<String, String> h = new HashMap<>();
+        h.put("Cache-Control", "max-age=604800");
+        return new WebResourceResponse("image/jpeg", null, 200, "OK", h, new ByteArrayInputStream(body));
+    }
+    private void keepCover(java.io.File f, byte[] body) {
+        if (f == null || body == null || body.length < 200) return;
+        try {
+            java.io.File tmp = new java.io.File(f.getPath() + ".part");
+            try (java.io.FileOutputStream o = new java.io.FileOutputStream(tmp)) { o.write(body); }
+            if (!tmp.renameTo(f)) tmp.delete();
+            if (Math.random() < 0.02) trimCovers(f.getParentFile());
+        } catch (Exception ignored) { }
+    }
+    private static void trimCovers(java.io.File dir) {
+        java.io.File[] fs = dir.listFiles();
+        if (fs == null) return;
+        java.util.Arrays.sort(fs, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        long total = 0;
+        for (java.io.File f : fs) { total += f.length(); if (total > 60L * 1024 * 1024) f.delete(); }
+    }
     private WebResourceResponse catCover(String query) {
         if (query == null) return notFound();
+        java.io.File kept = coverFile(query);
+        if (kept != null && kept.isFile() && System.currentTimeMillis() - kept.lastModified() < 30L * 86400000) {
+            try { return coverResponse(java.nio.file.Files.readAllBytes(kept.toPath())); } catch (Exception ignored) { }
+        }
         String[] bases = {Net.current, Net.lan, Net.remote};
         for (String b : bases) {
             if (b == null || b.isEmpty()) continue;
             Net.Res r = Net.once(b, "GET", "/sync/cat/cover?" + query, null, 2500, 30000);
             if (r.status == 200 && r.body != null && r.body.length > 0) {
-                Map<String, String> h = new HashMap<>();
-                h.put("Cache-Control", "max-age=604800");
-                return new WebResourceResponse("image/jpeg", null, 200, "OK", h, new ByteArrayInputStream(r.body));
+                keepCover(kept, r.body);
+                return coverResponse(r.body);
             }
             if (r.status == 404) break;
         }
@@ -535,9 +666,8 @@ public class MainActivity extends Activity {
         if (u != null && u.startsWith("https://")) {
             byte[] img = webBytes(u, 20000);
             if (img != null && img.length > 200) {
-                Map<String, String> h = new HashMap<>();
-                h.put("Cache-Control", "max-age=604800");
-                return new WebResourceResponse("image/jpeg", null, 200, "OK", h, new ByteArrayInputStream(img));
+                keepCover(kept, img);
+                return coverResponse(img);
             }
         }
         return notFound();
@@ -681,6 +811,7 @@ public class MainActivity extends Activity {
             pool.execute(() -> { try { NewsAlerts.check(this); } catch (Exception ignored) { } });
         }
         if (browser != null) browser.onResume();
+        if (mailPanel != null) mailPanel.onResume();
     }
 
     @Override
@@ -693,7 +824,7 @@ public class MainActivity extends Activity {
         int cut = 0;
         if (d.getRootWindowInsets() != null && d.getRootWindowInsets().getDisplayCutout() != null)
             cut = d.getRootWindowInsets().getDisplayCutout().getSafeInsetTop();
-        float px = cut / getResources().getDisplayMetrics().density;
+        float px = cut / (getResources().getDisplayMetrics().density * pageZoom);
         js("document.documentElement.style.setProperty('--cut','" + px + "px')");
     }
 
@@ -730,10 +861,17 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onStart() { super.onStart(); if (widgets != null) widgets.start(); }
+
+    @Override
+    protected void onStop() { if (widgets != null) widgets.stop(); super.onStop(); }
+
+    @Override
     protected void onPause() {
         js("window.Native && Native.onPause()");
         if (dictation != null) dictation.stop();          // the microphone is never left on in the background
         if (browser != null) browser.onPause();
+        if (mailPanel != null) mailPanel.onPause();
         super.onPause();
     }
 
@@ -741,6 +879,7 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         if (dictation != null) dictation.destroy();
         if (browser != null) browser.destroy();          // (its page is remembered: it opens again next time)
+        if (mailPanel != null) mailPanel.destroy();
         super.onDestroy();
     }
 
@@ -761,7 +900,7 @@ public class MainActivity extends Activity {
         int k = ev.getKeyCode();
         boolean system = k == android.view.KeyEvent.KEYCODE_BACK || k == android.view.KeyEvent.KEYCODE_HOME || k == android.view.KeyEvent.KEYCODE_POWER
                 || k == android.view.KeyEvent.KEYCODE_APP_SWITCH || k == android.view.KeyEvent.KEYCODE_MENU;
-        boolean browsing = browser != null && browser.view().getVisibility() == View.VISIBLE;
+        boolean browsing = (browser != null && browser.view().getVisibility() == View.VISIBLE) || mailShowing();
         if (!system && !browsing && (learnKey || pageKeys.contains(k))) {
             if (ev.getAction() == android.view.KeyEvent.ACTION_DOWN) {
                 if (learnKey) { learnKey = false; js("window.Native && Native.keyLearned && Native.keyLearned('a:" + k + "'," + JSONObject.quote(android.view.KeyEvent.keyCodeToString(k)) + ")"); }
@@ -777,8 +916,16 @@ public class MainActivity extends Activity {
     public void onBackPressed() {
         // on the Browser tab, Back goes back a page first; past the first page the app goes back (the page stays open)
         if (browser != null && browser.view().getVisibility() == View.VISIBLE && browser.back()) return;
+        if (mailShowing() && mailPanel.back()) return;
+        if (fromOtherApp && browser != null && browser.view().getVisibility() == View.VISIBLE) {      // (a link from another app: back to it)
+            fromOtherApp = false;
+            moveTaskToBack(true);
+            return;
+        }
         web.evaluateJavascript("window.Native ? Native.onBack() : false", v -> {
-            if (!"true".equals(v)) MainActivity.super.onBackPressed();
+            if ("true".equals(v)) return;
+            if (Launcher.isDefault(MainActivity.this, Launcher.HOME)) return;      // the home screen never closes itself
+            MainActivity.super.onBackPressed();
         });
     }
 
@@ -877,6 +1024,30 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) { }
     }
 
+    /** (from BabelNotifs) a notification came or went: the quick panel, if open, shows it */
+    static void notifsChanged() {
+        MainActivity a = live == null ? null : live.get();
+        if (a != null) a.js("window.Native && Native.notifsChanged && Native.notifsChanged()");
+    }
+    private volatile boolean mediaAwake = false, sleepHold = false, idleHold = false, fromOtherApp = false;
+    private void applyAwake() {
+        final boolean on = mediaAwake || sleepHold || idleHold;
+        runOnUiThread(() -> {
+            if (on) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        });
+    }
+    /** any touch or key, the browser's included: the page's sleep timer starts again */
+    private long lastPoke = 0;
+    @Override
+    public void onUserInteraction() {
+        super.onUserInteraction();
+        long t = android.os.SystemClock.uptimeMillis();
+        if (t - lastPoke < 700) return;
+        lastPoke = t;
+        js("window.Native && Native.poke && Native.poke()");
+    }
+
     private void js(final String code) {
         if (web != null) runOnUiThread(() -> web.evaluateJavascript(code, null));
     }
@@ -921,6 +1092,17 @@ public class MainActivity extends Activity {
             }
             return tmp.renameTo(f);
         }
+
+        /** the browser's time limits: {limits:{site:minutes}, used:{site:seconds today}} */
+        @JavascriptInterface
+        public String siteLimits() { return BrowserPanel.limitsJson(MainActivity.this); }
+
+        /** a daily limit for a website, in minutes (0 takes it off) */
+        @JavascriptInterface
+        public void setSiteLimit(String site, int minutes) { BrowserPanel.setLimit(MainActivity.this, site, minutes); }
+
+        @JavascriptInterface
+        public void setSiteLimits(String json) { BrowserPanel.setAllLimits(MainActivity.this, json); }
 
         /** what the home-screen widget shows (see BabelWidget); its cover is fetched first if the app hasn't yet */
         @JavascriptInterface
@@ -1125,14 +1307,25 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> startActivityForResult(i, REQ_SCAN));
         }
 
+        /** the app's window in density-independent pixels (the page scales itself up to suit a big DeX window) */
+        @JavascriptInterface
+        public String viewDp() {
+            float d = getResources().getDisplayMetrics().density;
+            return Math.round(web.getWidth() / d) + "x" + Math.round(web.getHeight() / d);
+        }
+        /** how much the page is scaled up (its CSS pixels → the screen's dp), so the browser lands where the page says */
+        @JavascriptInterface
+        public void setZoom(float k) { pageZoom = k > 0.3f && k < 4f ? k : 1f; }
+
         /** Samsung DeX (the phone on a monitor, as a desktop): the app takes the computer's layout. */
         @JavascriptInterface
-        public boolean isDex() {
-            try {
-                android.content.res.Configuration c = getResources().getConfiguration();
-                Class<?> k = c.getClass();
-                return k.getField("SEM_DESKTOP_MODE_ENABLED").getInt(k) == k.getField("semDesktopModeEnabled").getInt(c);
-            } catch (Exception e) { return false; }
+        public boolean isDex() { return dexMode() != null; }
+        /** what the app knows about its screen (shown in Settings → Look, to tell what DeX looks like from here) */
+        @JavascriptInterface
+        public String screenInfo() {
+            android.content.res.Configuration c = getResources().getConfiguration();
+            String why = dexMode();
+            return "DeX: " + (why == null ? "not detected" : why) + " · density " + getResources().getDisplayMetrics().density + " · display " + displayId();
         }
 
         @JavascriptInterface
@@ -1211,6 +1404,94 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void browserShow(String rect) { runOnUiThread(() -> { ensureBrowser(""); placeBrowser(rect); }); }
 
+        // ---- the quick panel (the face in the top bar): Wi-Fi, volume, brightness, battery, notifications
+        @JavascriptInterface
+        public String quickStatus() { return QuickPanel.status(MainActivity.this); }
+
+        @JavascriptInterface
+        public boolean setVolume(String which, int v) { return QuickPanel.setVolume(MainActivity.this, which, v); }
+
+        @JavascriptInterface
+        public void setBrightness(final float f) { runOnUiThread(() -> QuickPanel.setBrightness(MainActivity.this, f)); }
+
+        @JavascriptInterface
+        public boolean setAutoBrightness(boolean on) { return QuickPanel.setAuto(MainActivity.this, on); }
+
+        @JavascriptInterface
+        public void openSystem(String what) { runOnUiThread(() -> QuickPanel.open(MainActivity.this, what)); }
+
+        @JavascriptInterface
+        public String notifs() { return BabelNotifs.list(MainActivity.this); }
+
+        @JavascriptInterface
+        public boolean openNotif(String key) { return BabelNotifs.open(key); }
+
+        @JavascriptInterface
+        public void clearNotif(String key) { BabelNotifs.clear(key); }
+
+        // ---- other apps' widgets on the Mail tab (Gmail's inbox): the real widgets, so a tap opens the app
+        @JavascriptInterface
+        public String widgetProviders() { return widgets.providers(); }
+
+        @JavascriptInterface
+        public void widgetAdd(String pkg, String cls) { runOnUiThread(() -> widgets.add(pkg, cls)); }
+
+        @JavascriptInterface
+        public String widgetList() { return widgets.list(); }
+
+        @JavascriptInterface
+        public void widgetRemove(int id) { runOnUiThread(() -> widgets.remove(id)); }
+
+        @JavascriptInterface
+        public void widgetUp(int id) { runOnUiThread(() -> widgets.up(id)); }
+
+        /** the Mail tab's room for them ({x, y, w, h} CSS px), with rounded corners like the page's cards */
+        @JavascriptInterface
+        public void widgetsShow(String json) {
+            runOnUiThread(() -> {
+                try {
+                    JSONObject r = new JSONObject(json);
+                    float d = getResources().getDisplayMetrics().density * pageZoom;
+                    android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(Math.max(1, Math.round((float) r.optDouble("w") * d)), Math.max(1, Math.round((float) r.optDouble("h") * d)));
+                    lp.leftMargin = Math.round((float) r.optDouble("x") * d);
+                    lp.topMargin = Math.round((float) r.optDouble("y") * d);
+                    final float rad = (float) r.optDouble("radius", 14) * d;
+                    widgets.dock.setLayoutParams(lp);
+                    widgets.dock.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                        @Override public void getOutline(View v, android.graphics.Outline o) { o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), rad); }
+                    });
+                    widgets.dock.setClipToOutline(true);
+                    widgets.dock.setVisibility(View.VISIBLE);
+                    widgets.dock.bringToFront();
+                    if (nub != null) nub.bringToFront();
+                    widgets.placed();
+                } catch (Exception ignored) { }
+            });
+        }
+
+        @JavascriptInterface
+        public void widgetsHide() { runOnUiThread(() -> widgets.dock.setVisibility(View.INVISIBLE)); }
+
+        // ---- the Mail tab's browser (Gmail): shown in the same room as the Browser tab's, kept while you're elsewhere
+        @JavascriptInterface
+        public void mailShow(String rect) { runOnUiThread(() -> { ensureMail(""); placePanel(mailPanel, rect); }); }
+
+        @JavascriptInterface
+        public void mailOpen(String url) { runOnUiThread(() -> { if (!ensureMail(url)) mailPanel.open(url); }); }
+
+        @JavascriptInterface
+        public void mailHide() { runOnUiThread(() -> { if (mailPanel != null) mailPanel.view().setVisibility(View.INVISIBLE); if (browser == null || browser.view().getVisibility() != View.VISIBLE) hideNub(); }); }
+
+        /** the page open on the Mail tab ({url, title, alive}), or "" */
+        @JavascriptInterface
+        public String mailState() {
+            android.content.SharedPreferences p = getSharedPreferences("browser", MODE_PRIVATE);
+            BrowserPanel b = mailPanel;
+            String u = b != null && !b.url().isEmpty() ? b.url() : p.getString("mail_url", "");
+            if (u.isEmpty() && b == null) return "";
+            try { return new JSONObject().put("url", u).put("title", b != null ? b.title() : p.getString("mail_title", "")).put("alive", b != null).toString(); } catch (Exception e) { return ""; }
+        }
+
         /** Another tab: the browser is put out of sight, its page kept (what's playing carries on). */
         @JavascriptInterface
         public void browserHide() { runOnUiThread(() -> { if (browser != null) browser.view().setVisibility(View.INVISIBLE); hideNub(); }); }
@@ -1238,6 +1519,22 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public boolean setBrowserHistory(String json) { return BrowserPanel.writeHistory(MainActivity.this, json); }
+
+        /** privacy: every cookie and what websites stored on the phone */
+        @JavascriptInterface
+        public void clearSiteData(final String hosts) {
+            runOnUiThread(() -> {
+                try { BrowserPanel.clearAllSiteData(MainActivity.this, new JSONArray(hosts)); } catch (Exception e) { BrowserPanel.clearAllSiteData(MainActivity.this, null); }
+            });
+        }
+
+        /** privacy: one website's cookies and stored data (hosts = the addresses of it you visited) */
+        @JavascriptInterface
+        public void forgetSite(final String site, final String hosts) {
+            runOnUiThread(() -> {
+                try { BrowserPanel.forgetSite(MainActivity.this, site, new JSONArray(hosts)); } catch (Exception e) { BrowserPanel.forgetSite(MainActivity.this, site, null); }
+            });
+        }
 
         /** Fetch the computer's ad and tracker block lists for the browser (about 1 MB, compressed). */
         @JavascriptInterface
@@ -1304,12 +1601,55 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
-        public void keepAwake(final boolean on) {
+        public void keepAwake(final boolean on) { mediaAwake = on; applyAwake(); }
+
+        // ---- Babel as the home screen (the Add-ons tab) and the sleep screen
+        /** the phone's apps: [{pkg, cls, label}] (icons at /appicon?p=&c=) */
+        @JavascriptInterface
+        public String apps() { return Launcher.apps(MainActivity.this); }
+
+        @JavascriptInterface
+        public boolean launchApp(String pkg, String cls) { return Launcher.launch(MainActivity.this, pkg, cls); }
+
+        @JavascriptInterface
+        public void appInfo(String pkg) { Launcher.info(MainActivity.this, pkg); }
+
+        /** "home" or "browser": is Babel the phone's default? */
+        @JavascriptInterface
+        public boolean isDefault(String which) { return Launcher.isDefault(MainActivity.this, which); }
+
+        /** Android asks you to make Babel the default home screen / browser (answer at Native.roleChanged) */
+        @JavascriptInterface
+        public void askDefault(String which) { runOnUiThread(() -> Launcher.ask(MainActivity.this, which)); }
+
+        /** the phone's own page for choosing them (to switch back) */
+        @JavascriptInterface
+        public void defaultSettings(String which) { runOnUiThread(() -> Launcher.settings(MainActivity.this, which)); }
+
+        @JavascriptInterface
+        public void dreamSettings() { runOnUiThread(() -> Launcher.dreamSettings(MainActivity.this)); }
+
+        @JavascriptInterface
+        public boolean isDream() { return Launcher.isDream(MainActivity.this); }
+
+        @JavascriptInterface
+        public String battery() { return Launcher.battery(MainActivity.this).toString(); }
+
+        /** the sleep screen is up (dim the screen, keep it on for a while) or gone (back to normal) */
+        @JavascriptInterface
+        public void sleeping(final boolean on, final boolean hold) {
+            sleepHold = on && hold;
             runOnUiThread(() -> {
-                if (on) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                WindowManager.LayoutParams lp = getWindow().getAttributes();
+                lp.screenBrightness = on ? 0.04f : WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+                getWindow().setAttributes(lp);
             });
+            applyAwake();
         }
+
+        /** keep the screen on while you're in the app, until the sleep screen's turn comes (Settings → Sleep screen) */
+        @JavascriptInterface
+        public void holdAwake(boolean on) { idleHold = on; applyAwake(); }
 
         // ---- downloads from the computer (Android's download manager: keeps going in the background, resumes,
         //      works on Wi-Fi and cellular, shows progress in the notification shade)

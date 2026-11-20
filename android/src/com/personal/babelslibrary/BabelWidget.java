@@ -181,7 +181,7 @@ public class BabelWidget extends AppWidgetProvider {
 
     /** the cover the app has already fetched; otherwise the title on a coloured cover, like the app shows */
     private static Bitmap cover(Context c, JSONObject it, int w, int h) {
-        int id = it.optInt("id");
+        int id = it.optInt("cover_id", it.optInt("id"));          // (a reading copy shows its book's cover)
         File dir = new File(c.getCacheDir(), "covers");
         File[] fs = dir.listFiles((x, n) -> n.startsWith(id + "_"));
         Bitmap src = null;

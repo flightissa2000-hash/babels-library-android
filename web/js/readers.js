@@ -439,6 +439,24 @@ Object.assign(window.Reader, (() => {
     if (anns().some((a) => isBm(a) && a.locator.page === num)) { if (!box.querySelector(".bm-flag")) box.insertAdjacentHTML("beforeend", `<i class="bm-flag"></i>`); }
     else box.querySelector(".bm-flag")?.remove();
   }
+  /* just the selected words: a range's own rectangles and text also take in whatever else it crosses,
+     and a selection running over a page break crosses whole-page canvases and layers */
+  function selectedText(range) {
+    const top = range.commonAncestorContainer, root = top.nodeType === 1 ? top : top.parentNode;
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+    const part = document.createRange(), boxes = [];
+    let quote = "";
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      if (!range.intersectsNode(n) || !n.parentElement?.closest(".textLayer")) continue;
+      if (n.nodeType === 1) { if (n.tagName === "BR") quote += " "; continue; }
+      const from = n === range.startContainer ? range.startOffset : 0, to = n === range.endContainer ? range.endOffset : n.length;
+      if (to <= from) continue;
+      part.setStart(n, from); part.setEnd(n, to);
+      quote += n.data.slice(from, to);
+      boxes.push(...part.getClientRects());
+    }
+    return { quote: quote.replace(/\s+/g, " ").trim(), boxes };
+  }
   // selected text on a PDF page: its rectangles, as fractions of the page (the computer's form)
   function pdfSelection() {
     const sel = getSelection();
@@ -446,11 +464,11 @@ Object.assign(window.Reader, (() => {
     const range = sel.getRangeAt(0);
     const startPage = range.startContainer.parentElement?.closest(".pp");
     if (!startPage) return null;
-    const quote = sel.toString().replace(/\s+/g, " ").trim();
+    const { quote, boxes: words } = selectedText(range);
     if (!quote) return null;
     const boxes = $$("#rStage .pp").map((p) => ({ p, b: p.getBoundingClientRect() }));
     const rects = [];
-    for (const cr of range.getClientRects()) {
+    for (const cr of words) {
       if (cr.width < 1 || cr.height < 1) continue;
       const cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2;
       const hit = boxes.find(({ b }) => cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom);
@@ -461,7 +479,7 @@ Object.assign(window.Reader, (() => {
       else rects.push(r);
     }
     if (!rects.length) return null;
-    const all = range.getClientRects(), lr = all[all.length - 1];
+    const lr = words[words.length - 1];
     return { quote, locator: { page: rects[0].p, rects }, at: { x: lr.left + lr.width / 2, y: lr.bottom } };
   }
   document.addEventListener("selectionchange", () => {
@@ -591,6 +609,9 @@ Object.assign(window.Reader, (() => {
     R.cleanup = () => { try { book.destroy(); } catch (e) {} $("#reader").style.background = ""; };
     rend.hooks.content.register((contents) => {
       const d = contents.document;
+      d.documentElement.style.setProperty("--eq", S.readEq || 1.4);
+      { const wide = d.createElement("style"); wide.textContent = ".babel-paper .eq{overflow-x:auto;overflow-y:hidden;white-space:nowrap;-webkit-overflow-scrolling:touch} .babel-paper .eq img{max-width:none !important}"; d.head.append(wide); }   // (a wide equation scrolls at full size here, rather than shrinking to fit)
+      if ((() => { const m = String(th.bg || "").match(/[0-9a-f]{6}/i); if (!m) return false; const v = parseInt(m[0], 16); return ((v >> 16) * 299 + ((v >> 8 & 255) * 587) + (v & 255) * 114) / 1000 < 110; })()) { const inv = d.createElement("style"); inv.textContent = "img.im,img.gl,.eq img{filter:invert(1) hue-rotate(180deg)}"; d.head.append(inv); }   // (equations on a dark page)
       const s = d.createElement("style");
       s.textContent = `.ink-pin{position:absolute;z-index:5;width:24px;height:24px;margin:-26px 0 0 -12px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid rgba(0,0,0,.65);box-shadow:0 2px 6px rgba(0,0,0,.4);font:700 11px/20px sans-serif;text-align:center;color:#111}
         .ink-pin span{display:inline-block;transform:rotate(45deg)} .ink-pin.on{outline:3px solid #fff}`;
@@ -836,10 +857,142 @@ Object.assign(window.Reader, (() => {
     redraw();
   }
 
+  /* ---------------- searching the document, from Contents */
+  const findable = () => (R.kind === "pdf" && R.it.kind !== "graphic") || R.kind === "epub";
+  function flatten(root) {
+    const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let flat = "", space = true, was = null;
+    const map = [];
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (n.parentElement?.closest("script,style,.ink-pin")) continue;
+      const v = n.nodeValue, block = n.parentElement?.closest("p,li,div,h1,h2,h3,h4,td,section");
+      if (block !== was && !space) { flat += " "; map.push([n, 0]); space = true; }
+      was = block;
+      for (let i = 0; i < v.length; i++) {
+        let ch = v[i];
+        if (ch === "\u00ad" || ch === "\u200b") continue;
+        if (/\s/.test(ch)) { if (space) continue; ch = " "; space = true; } else space = false;
+        flat += ch; map.push([n, i]);
+      }
+    }
+    return { flat, map };
+  }
+  function allAt(text, q) {
+    const low = text.toLowerCase(), out = [];
+    for (let at = low.indexOf(q); at >= 0 && out.length < 500; at = low.indexOf(q, at + q.length)) out.push(at);
+    return out;
+  }
+  const hitRow = (i, where, text, at, len) => `<button class="toc-row find-hit" data-find-hit="${i}" style="display:block;white-space:normal;line-height:1.35"><small style="display:block;color:var(--ink-soft)">${esc(where)}</small>${at > 40 ? "…" : ""}${esc(text.slice(Math.max(0, at - 40), at))}<mark>${esc(text.slice(at, at + len))}</mark>${esc(text.slice(at + len, at + len + 50))}…</button>`;
+  function clearFind() {
+    document.querySelectorAll("#rStage .find-layer").forEach((x) => x.remove());
+    if (R && R.findCfi && R.rend) { try { R.rend.annotations.remove(R.findCfi, "highlight"); } catch (e) {} R.findCfi = null; }
+  }
+  async function runFind(s, qRaw) {
+    const q = qRaw.trim().toLowerCase(), run = (R.findRun = (R.findRun || 0) + 1), box = s.querySelector(".rs-find"), body = s.querySelector(".rs-body");
+    R.findQ = qRaw.trim();
+    clearFind();
+    if (q.length < 2) { box.hidden = true; body.hidden = false; return; }
+    box.hidden = false; body.hidden = true;
+    box.className = "rs-find rs-body";
+    box.innerHTML = `<p class="hint" data-find-state>Searching…</p><div data-find-rows></div>`;
+    const rows = box.querySelector("[data-find-rows]"), state = box.querySelector("[data-find-state]");
+    R.hits = [];
+    let any = false;
+    if (R.kind === "pdf") {
+      R.pageText = R.pageText || {};
+      for (let n = 1; n <= R.doc.numPages && run === R.findRun; n++) {
+        state.textContent = `Searching page ${n} of ${R.doc.numPages}…`;
+        if (R.pageText[n] == null) {
+          const c = await (await R.doc.getPage(n)).getTextContent();
+          R.pageText[n] = c.items.map((x) => (x.str || "") + (x.hasEOL ? " " : "")).join("").replace(/\s+/g, " ");
+        }
+        const text = R.pageText[n];
+        any = any || text.trim().length > 10;
+        allAt(text, q).forEach((at, nth) => { R.hits.push({ page: n, nth }); rows.insertAdjacentHTML("beforeend", hitRow(R.hits.length - 1, `Page ${n}`, text, at, q.length)); });
+      }
+    } else {
+      await R.book.ready;
+      const items = R.book.spine.spineItems.filter((x) => x.linear !== "no");
+      const flatToc = (l) => l.flatMap((t) => [t, ...flatToc(t.subitems || [])]);
+      const toc = flatToc(R.book.navigation?.toc || []);
+      for (let k = 0; k < items.length && run === R.findRun; k++) {
+        const sec = items[k];
+        state.textContent = `Searching section ${k + 1} of ${items.length}…`;
+        try {
+          const page = await sec.load(R.book.load.bind(R.book));
+          const el = page.querySelector ? (page.querySelector("body") || page) : page;
+          const { flat, map } = flatten(el);
+          any = any || flat.trim().length > 10;
+          const label = (toc.find((t) => t.href.split("#")[0].split("/").pop() === sec.href.split("/").pop())?.label || "").trim();
+          for (const [nth, at] of allAt(flat, q).entries()) {
+            const range = el.ownerDocument.createRange();
+            range.setStart(map[at][0], map[at][1]);
+            const end = map[at + q.length - 1];
+            range.setEnd(end[0], end[1] + 1);
+            R.hits.push({ cfi: sec.cfiFromRange(range), href: sec.href, nth });
+            rows.insertAdjacentHTML("beforeend", hitRow(R.hits.length - 1, label || `Section ${k + 1}`, flat, at, q.length));
+          }
+        } catch (e) { console.warn("search:", e); }
+      }
+    }
+    if (run !== R.findRun) return;
+    state.textContent = R.hits.length ? `${R.hits.length} match${R.hits.length === 1 ? "" : "es"}` : any ? "Nothing found." : "This document is pictures of its pages, so it has no text to search.";
+  }
+  async function goToHit(h) {
+    clearFind();
+    if (R.kind === "epub") {
+      // (the match is found again in the page as shown: a CFI worked out from the loaded file can land a little off)
+      const want = (R.findQ ?? $("#tocFindQ")?.value ?? "").trim().toLowerCase();
+      const rend = R.rendition || R.rend;
+      await rend.display(h.href);
+      const c = rend.getContents().find((x) => (R.book.spine.get(x.sectionIndex)?.href || "").split("/").pop() === h.href.split("/").pop());
+      let cfi = h.cfi;
+      if (c && want) {
+        const { flat, map } = flatten(c.document.body);
+        const at = allAt(flat, want)[h.nth] ?? allAt(flat, want)[0];
+        if (at != null) {
+          const range = c.document.createRange();
+          range.setStart(map[at][0], map[at][1]);
+          const end = map[at + want.length - 1];
+          range.setEnd(end[0], end[1] + 1);
+          try { cfi = c.cfiFromRange(range); } catch (e) {}
+        }
+      }
+      await rend.display(cfi);
+      R.findCfi = cfi;
+      rend.annotations.highlight(cfi, {}, null, "find-hl", { fill: "rgb(255, 210, 64)", "fill-opacity": "0.55", "mix-blend-mode": "multiply" });
+      return;
+    }
+    R.go(h.page);
+    const q = (R.findQ || "").toLowerCase();
+    for (let t = 0; t < 40; t++) {
+      const box = $(`#rStage .pp[data-page="${h.page}"]`), tl = box && box.querySelector(".textLayer");
+      if (tl && tl.querySelector("span")) {
+        await new Promise((r) => setTimeout(r, 350));       // (the text settles into place just after it appears)
+        const { flat, map } = flatten(tl);
+        const at = allAt(flat, q)[h.nth] ?? allAt(flat, q)[0];
+        if (at != null) {
+          const range = document.createRange();
+          range.setStart(map[at][0], map[at][1]);
+          const end = map[at + q.length - 1];
+          range.setEnd(end[0], end[1] + 1);
+          const b = box.getBoundingClientRect(), layer = document.createElement("div");
+          layer.className = "find-layer";
+          layer.innerHTML = [...range.getClientRects()].filter((r) => r.width > 1).map((r) => `<i style="left:${(r.left - b.left) / b.width * 100}%;top:${(r.top - b.top) / b.height * 100}%;width:${r.width / b.width * 100}%;height:${r.height / b.height * 100}%"></i>`).join("");
+          box.append(layer);
+          if (modeOf("pdf") === "scroll") layer.firstChild?.scrollIntoView({ block: "center" });
+        }
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+
   /* ---------------- ☰ contents (chapters, pages, bookmarks; episodes for TV) */
   async function tocSheet() {
     if (!R || !R.toc) return;
-    const s = sheet(`<div class="rs-head"><b>${R.kind === "video" ? "Episodes" : "Contents"}</b><button class="btn sm" data-rs-close>Done</button></div><div class="rs-body"><p class="hint">Loading…</p></div>`, "toc");
+    const s = sheet(`<div class="rs-head"><b>${R.kind === "video" ? "Episodes" : "Contents"}</b><button class="btn sm" data-rs-close>Done</button></div>${findable() ? `<form class="toc-go" data-find-form style="margin:8px 14px 0"><input type="search" enterkeyhint="search" placeholder="Search this document" value="${esc(R.findQ || "")}"><button class="btn sm">Find</button></form><div class="rs-find" hidden></div>` : ""}<div class="rs-body"><p class="hint">Loading…</p></div>`, "toc");
+    s.querySelector("[data-find-form]")?.addEventListener("submit", (e) => { e.preventDefault(); runFind(s, e.target.querySelector("input").value); });
     const marks = anns().filter(isBm);
     const html = (marks.length ? `<h4>Bookmarks</h4><div class="toc-tree">${sortAnns().filter(isBm).map((a) => `<button class="toc-row bm" data-toc-ann="${esc(a.id)}" style="--bm:${hl(a.color)}">🔖 ${esc(a.title || a.locator.label || `p. ${a.locator.page}`)}</button>`).join("")}</div>` : "") + await R.toc();
     if (!s.hidden && R) { s.querySelector(".rs-body").innerHTML = html; s.querySelector(".toc-row.on, .toc-pg.on")?.scrollIntoView({ block: "center" }); }
@@ -854,6 +1007,7 @@ Object.assign(window.Reader, (() => {
     const pdfComic = key === "comic" || (key === "pdf" && R.it.kind === "graphic");
     sheet(`<div class="rs-head"><b>Layout</b><button class="btn sm" data-rs-close>Done</button></div><div class="rs-body">
       <div class="vs-modes">${b("pages", "One page", "Tap or swipe to turn")}${b("double", "Two pages", "Side by side, like an open book")}${b("scroll", "Scrolling", "One long page")}</div>
+      ${key === "epub" && String(R.it.source || "").startsWith("reading-copy:") ? `<label class="vs-row">Equation size <input type="range" min="1" max="3.5" step="0.1" value="${S.readEq || 1.4}" data-vs-eq><b data-vs-eqv>${S.readEq || 1.4}×</b></label>` : ""}
       ${key === "epub" ? `<label class="vs-row">Text size <input type="range" min="70" max="180" step="5" value="${S.readFont || 100}" data-vs-font><b data-vs-fontv>${S.readFont || 100}%</b></label>
         <label class="vs-row">Gap above and below <input type="range" min="0" max="120" step="4" value="${S.readGap || 0}" data-vs-gap><b data-vs-gapv>${S.readGap || 0}px</b></label>` : ""}
       ${key !== "epub" && m !== "scroll" ? `<label class="vs-row check"><input type="checkbox" data-vs-fitw ${$("#rStage").classList.contains("fitw") ? "checked" : ""}> Fit the width (scroll down the page)</label>` : ""}
@@ -1214,6 +1368,7 @@ Object.assign(window.Reader, (() => {
       if (R.active !== a.id) { R.active = a.id; s.querySelectorAll(".rn").forEach((x) => x.classList.toggle("on", x === row)); redraw(); }
       return;
     }
+    const fh = t.closest("[data-find-hit]"); if (fh) { closeSheet(); return goToHit(R.hits[Number(fh.dataset.findHit)]); }
     const pg = t.closest("[data-toc-page]"); if (pg) { closeSheet(); return R.go(Number(pg.dataset.tocPage)); }
     const hr = t.closest("[data-toc-href]"); if (hr) { closeSheet(); return R.go(hr.dataset.tocHref); }
     const de = t.closest("[data-toc-dest]"); if (de) { closeSheet(); return R.dest(Number(de.dataset.tocDest)); }
@@ -1233,6 +1388,12 @@ Object.assign(window.Reader, (() => {
       clearTimeout(a._t);
       const f = e.target.matches(".rn-title") ? "title" : "note", v = e.target.value;
       a._t = setTimeout(() => Ann.edit(a, { [f]: v }), 400);
+    }
+    if (e.target.matches("[data-vs-eq]")) {
+      S.readEq = Number(e.target.value);
+      $("[data-vs-eqv]").textContent = S.readEq + "×";
+      (R.rend?.getContents() || []).forEach((c) => c.document.documentElement.style.setProperty("--eq", S.readEq));
+      clearTimeout(R.fontT); R.fontT = setTimeout(() => { saveState(); try { R.rend.views().forEach((v) => { v.expand?.(); v.pane?.render(); }); } catch (err) {} drawEpubPins(); }, 400);
     }
     if (e.target.matches("[data-vs-font]")) {
       S.readFont = Number(e.target.value);

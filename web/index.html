@@ -8,14 +8,18 @@
 <link rel="stylesheet" href="css/themes.css">
 <link rel="stylesheet" href="css/app.css">
 <link rel="stylesheet" href="css/layouts.css">
+<link rel="stylesheet" href="css/galaxy.css">
+<link rel="stylesheet" href="css/galaxy.gen.css">
+<link rel="stylesheet" href="css/galaxy-phone.css">
+<link rel="stylesheet" href="css/sky.css">
 </head>
 <body>
 <header class="top">
   <button class="nav-menu" id="navMenu" type="button" aria-label="Menu">☰</button>
   <span class="brand-mark" aria-hidden="true"></span>
-  <button class="prof-chip" id="profChip" type="button" hidden></button>
-  <h1>Babel's Library</h1>
   <time class="clock" id="clock"></time>
+  <button class="prof-chip" id="profChip" type="button" hidden></button>
+  <span class="top-gap" aria-hidden="true"></span>
   <button class="sync-pill" id="syncPill" type="button"><i></i><span>…</span></button>
 </header>
 <main id="view"></main>
@@ -23,11 +27,12 @@
 <nav class="tabs" id="tabs">
   <button data-tab="home" class="on" style="--k:0"><b>⌂</b><span>Home</span></button>
   <button data-tab="library" style="--k:1"><b>▥</b><span>Library</span></button>
-  <button data-tab="catalogue" style="--k:2"><b>✦</b><span>Catalogue</span></button>
-  <button data-tab="news" style="--k:3"><b>❡</b><span>News</span></button>
-  <button data-tab="journal" style="--k:4"><b>✎</b><span>Journal</span></button>
-  <button data-tab="browser" style="--k:5"><b>◍</b><span>Browser</span></button>
-  <button data-tab="settings" style="--k:6"><b>⚙</b><span>Settings</span></button>
+  <button data-tab="press" style="--k:2"><b>❡</b><span>Newsstand</span></button>
+  <button data-tab="journal" style="--k:3"><b>✎</b><span>Journal</span></button>
+  <button data-tab="browser" style="--k:4"><b>◍</b><span>Browser</span></button>
+  <button data-tab="mail" style="--k:5"><b>✉</b><span>Mail</span></button>
+  <button data-tab="apps" style="--k:6"><b>⊞</b><span>Add-ons</span></button>
+  <button data-tab="settings" style="--k:7"><b>⚙</b><span>Settings</span></button>
   <button class="nav-hide" id="navHide" type="button" title="Hide the tabs (full screen)"><b>⇥</b><span>Hide tabs</span></button>
 </nav>
 <button class="nav-nub" id="navNub" type="button" aria-label="Show the tabs"><i>‹</i><b id="navNubIc">⌂</b></button>
@@ -49,5 +54,9 @@
 <script src="js/readers.js"></script>
 <script src="js/pagekeys.js"></script>
 <script src="js/layouts.js"></script>
+<script src="js/sky.js"></script>
+<script src="js/addons.js"></script>
+<script src="js/mail.js"></script>
+<script src="js/quick.js"></script>
 </body>
 </html>

@@ -1,16 +1,30 @@
 /* The journal on the phone: the same reading/watching log as the computer's Journal (status, finish date, score for
    films, and dated review entries), changed here and sent back on the next sync. */
 const Journal = (() => {
-  const STATUS = [["reading", "Reading"], ["finished", "Finished"], ["hold", "On hold"], ["dropped", "Dropped"]];
+  const STATUS = [["reading", "Reading"], ["next", "Up next"], ["finished", "Finished"], ["hold", "On hold"], ["dropped", "Dropped"]];
+  // the words for each kind: you read a book, watch a film or a show, play a game
+  const DOING = { movie: "Watching", show: "Watching", game: "Playing", other: "In progress" };
+  const stList = (kind) => STATUS.map(([k, n]) => [k, k === "reading" ? (kind === undefined ? "In progress" : DOING[kind] || "Reading") : n]);
+  const stName = (st, kind) => stList(kind).find((s) => s[0] === st)?.[1];
+  const SCORED = (kind) => kind === "movie" || kind === "show";
   const KIND_ICON = { book: "📖", movie: "🎬", show: "📺", game: "🎮", other: "✦", writing: "✍" };
+  const KIND_ORDER = ["book", "movie", "show", "game", "other"];
+  const KIND_PLURAL = { book: "Books", movie: "Films", show: "Shows", game: "Games", other: "Notes" };
   /* two notebooks, as on the computer: the review journal, and the writing notebook (ideas, drafts, and the quick
      notes put into it). The writing notebook's pages are log rows of kind "writing". */
-  let BOOK = load("jbook.json", "reviews");
-  const W = () => BOOK === "writing";
+  /* three pages: Now (what you're in the middle of, with one-tap buttons), Log (everything, with the filters) and
+     Write (the writing notebook and quick notes). Now and Log are the review journal; Write is the writing notebook. */
+  let PAGE = load("jpage.json", null) || (load("jbook.json", "reviews") === "writing" ? "write" : "now");
+  if (!["now", "log", "write"].includes(PAGE)) PAGE = "now";
+  const setPage = (p) => { PAGE = p; store("jpage.json", PAGE); };
+  const W = () => PAGE === "write";
+  let scoring = null;     // (Now) the card whose score chips are open
+  let confirming = null, confirmT = 0;     // (Now) the card asking "tap again to confirm"
   const inBook = (l) => (l.kind === "writing") === W();
   const cid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
   const today = () => new Date().toISOString().slice(0, 10);
   let openId = null;      // the log row on screen
+  let openKey = null;     // ...and what else finds it again once a sync gives it the computer's id (its item, title)
 
   function jop(op) {
     S.jops.push({ ...op, ts: now() });
@@ -18,6 +32,21 @@ const Journal = (() => {
     clearTimeout(jop.t); jop.t = setTimeout(() => sync(), 3000);
   }
   const logById = (id) => S.log.find((l) => String(l.id) === String(id));
+  // the open row: by its id, or, when a sync just swapped the phone's temporary row for the computer's, by its item
+  function openLog() {
+    if (openId == null) return null;
+    let l = logById(openId);
+    if (!l && openKey) {
+      l = (openKey.item_id && S.log.find((x) => x.item_id === openKey.item_id))
+        || S.log.find((x) => x.kind === openKey.kind && x.title === openKey.title && !String(x.id).startsWith("c:"));
+      if (l) openId = l.id;
+    }
+    return l || null;
+  }
+  // after a sync: the computer's ids for rows made here (the open one keeps working)
+  function remap(made) {
+    if (openId != null && String(openId).startsWith("c:") && made && made[String(openId).slice(2)] != null) openId = made[String(openId).slice(2)];
+  }
   const entriesOf = (l) => Object.values(S.journal).filter((j) => String(j.log_id) === String(l.id)).sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
   const statusOf = (l) => l.status || (l.finished ? "finished" : "");
   const fmtDay = (d) => { if (!d) return ""; const t = new Date(d + "T12:00:00"); return isNaN(t) ? d : t.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }); };
@@ -41,29 +70,92 @@ const Journal = (() => {
     jop({ op: "log", ...ref, fields });
   }
 
+  // the status picked on an item's own page (tap the one it has to take it off)
+  function setStatus(it, k) {
+    const l = forItem(it), cur = statusOf(l);
+    if (cur === k) return setFields(l, { status: "", ...(k === "finished" ? { finished: null } : {}) });
+    setFields(l, { status: k, ...(k === "finished" && !l.finished ? { finished: today() } : {}) });
+  }
   const key = (l) => (l.finished ? "1" + l.finished : statusOf(l) === "reading" ? "2" : "0");
 
+  // what the Ticket stubs style draws (the ADMITTED stamp, the punched score, the ticket line); other styles hide them
+  const xNo = (t) => { let h = 7; for (const c of String(t || "")) h = (h * 31 + c.charCodeAt(0)) >>> 0; return String(h % 100000).padStart(5, "0"); };
+  function extras(l) {
+    const st = statusOf(l), sc = SCORED(l.kind) && l.score != null ? +l.score : null;
+    return `<span class="jx jx-stamp" data-st="${st || "none"}"${st === "finished" ? ' data-t="Admitted"' : ""}>${esc(st === "finished" ? "Finished" : stName(st, l.kind) || "")}</span>
+      ${sc != null ? `<span class="jx jx-holes">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `<i class="${n <= sc ? "on" : ""}"></i>`).join("")}</span>` : ""}
+      <span class="jx jx-admit">${esc({ movie: "Admit one", show: "Admit one · series", game: "1 token", book: "Library slip", other: "Note" }[l.kind] || "Slip")} · No. ${xNo(l.title)}</span>`;
+  }
+  const seg = () => `<div class="seg j-books j-pages">${[["now", "◐ Now"], ["log", "📔 Log"], ["write", "✍ Write"]].map(([k, n]) => `<button data-jpage="${k}" class="${PAGE === k ? "on" : ""}">${n}</button>`).join("")}</div>`;
+
+  /* Now: what you're reading, watching or playing, and what's up next, as big cards with the buttons you use most */
+  function nowCard(l) {
+    const it = l.item_id && S.items[l.item_id], st = statusOf(l), ents = entriesOf(l), last = ents[ents.length - 1];
+    const p = it ? pct(it) : 0, id = esc(l.id);
+    const kindName = { book: "Book", movie: "Film", show: "TV show", game: "Game", other: "Note" }[l.kind] || "";
+    // the first button says where it stands (Reading, Watching, Up next); tap it and it asks, tap again to confirm
+    const asking = confirming === String(l.id);
+    const stateBtn = st === "next"
+      ? `<button class="btn sm jn-state ${asking ? "ask" : ""}" data-jq="state" data-jid="${id}">${asking ? "▶ Start it? Tap to confirm" : "⏳ Up next"}</button>`
+      : `<button class="btn sm jn-state ${asking ? "ask" : ""}" data-jq="state" data-jid="${id}">${asking ? "✓ Finished? Tap to confirm" : `● ${esc(stName("reading", l.kind))}`}</button>`;
+    const acts = st === "next"
+      ? `${stateBtn}<button class="btn sm" data-jq="drop-next" data-jid="${id}">Not now</button>`
+      : `${stateBtn}${SCORED(l.kind) ? `<button class="btn sm" data-jq="score" data-jid="${id}">★ ${l.score != null ? +l.score : "Score"}</button>` : ""}<button class="btn sm" data-jq="hold" data-jid="${id}">⏸ On hold</button>`;
+    const lbl = kindName + (st === "reading" ? ` · ${stName("reading", l.kind)}` : st === "next" ? " · Up next" : "");
+    return `<div class="jn-card jn-${st} k-${l.kind}" style="--c:${colorFor(l)}">${extras(l)}<button class="jn-cov" data-log="${id}">${logCover(l, it)}</button>
+      <div class="jn-t"><small class="jn-k">${esc(lbl)}</small>
+        <button class="jn-title" data-log="${id}">${esc(l.title)}</button>
+        ${p > 1 && p < 100 ? `<span class="jn-p"><i style="width:${p}%"></i></span><small class="jn-pp">${p}%</small>` : ""}
+        ${last ? `<span class="jn-q">“${esc(last.body.slice(0, 90))}${last.body.length > 90 ? "…" : ""}”</span>` : ""}
+        <div class="jn-acts">${acts}<button class="btn sm" data-log="${id}" aria-label="Write about it">✎</button></div>
+        ${scoring === String(l.id) ? `<div class="jn-score">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `<button data-jscore="${n}" data-jid="${id}" class="${+l.score === n ? "on" : ""}">${n}</button>`).join("")}${l.score != null ? `<button data-jscore="" data-jid="${id}">✕</button>` : ""}</div>` : ""}</div></div>`;
+  }
+  function renderNow(v) {
+    const mine = S.log.filter((l) => l.kind !== "writing");
+    const by = (k) => mine.filter((l) => statusOf(l) === k).sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+    const now = by("reading"), next = by("next");
+    const kinds = new Set(now.map((l) => l.kind));
+    const tk = S.jstyle === "tickets";
+    const head = tk ? "Now showing" : kinds.size === 1 ? `${stName("reading", [...kinds][0])} now` : "In progress";
+    const nextHead = tk ? "Coming soon" : "Up next";
+
+    const year = new Date().getFullYear(), done = mine.filter((l) => String(l.finished || "").startsWith(year)).length;
+    v.innerHTML = `<div class="jv jn">${seg()}
+      ${tk ? `<div class="tk-marquee"><i class="tk-bulbs"></i><b>Babel's Picture House</b><span><em>${now.length}</em> now showing <s>·</s> <em>${next.length}</em> coming soon <s>·</s> <em>${done}</em> seen in ${year}</span><i class="tk-bulbs"></i></div>`
+        : `<div class="jn-sum"><span><b>${now.length}</b> in progress</span><span><b>${next.length}</b> up next</span><span><b>${done}</b> finished in ${year}</span></div>`}
+      <h3 class="j-month">${esc(head)}</h3>
+      ${now.length ? now.map(nowCard).join("") : `<p class="empty">Nothing in progress. Open something in the Library, or ＋ Add below.</p>`}
+      ${next.length ? `<h3 class="j-month">${nextHead}</h3>${next.map(nowCard).join("")}` : ""}
+      <button class="btn jn-add" id="jNew">＋ Add something to the journal</button>
+      <p class="hint jn-tip">Everything else (finished, on hold, dropped) and the filters are on the Log page.</p></div>`;
+  }
+
   function render(v) {
+    if (PAGE === "now") return renderNow(v);
     const words = S.jq.toLowerCase().split(/\s+/).filter(Boolean);
-    const rows = S.log.filter((l) => inBook(l) && (W() || S.jstatus === "all" || statusOf(l) === S.jstatus) && words.every((w) => String(l.title).toLowerCase().includes(w)))
+    const kinds = KIND_ORDER.filter((k) => S.log.some((l) => inBook(l) && l.kind === k));
+    if (!W() && S.jkind !== "all" && !kinds.includes(S.jkind)) S.jkind = "all";
+    const rows = S.log.filter((l) => inBook(l) && (W() || ((S.jkind === "all" || l.kind === S.jkind) && (S.jstatus === "all" || statusOf(l) === S.jstatus))) && words.every((w) => String(l.title).toLowerCase().includes(w)))
       // reading now first, then the most recently finished, then the rest (the writing notebook: last written in first)
       .sort((a, b) => (W() ? 0 : key(b).localeCompare(key(a))) || (b.updated_at || 0) - (a.updated_at || 0));
     const year = new Date().getFullYear();
     const done = S.log.filter((l) => String(l.finished || "").startsWith(year));
     let html = "", cur = "";
     for (const l of rows.slice(0, S.limit)) {
-      const g = W() ? "Pages" : l.finished ? new Date(l.finished + "T12:00:00").toLocaleDateString([], { month: "long", year: "numeric" }) : statusOf(l) === "reading" ? "Reading now" : "No date";
+      const g = W() ? "Pages" : l.finished ? new Date(l.finished + "T12:00:00").toLocaleDateString([], { month: "long", year: "numeric" }) : statusOf(l) === "reading" ? (S.jkind === "all" ? "In progress" : `${stName("reading", S.jkind)} now`) : "No date";
       if (g !== cur) { html += `${cur ? "</div>" : ""}<h3 class="j-month">${esc(g)}</h3><div class="list">`; cur = g; }
       html += rowHtml(l);
     }
     if (cur) html += "</div>";
     const qn = quick();
-    v.innerHTML = `<div class="jv"><div class="seg j-books"><button data-jbook="reviews" class="${W() ? "" : "on"}">📔 Reviews</button><button data-jbook="writing" class="${W() ? "on" : ""}">✍ Writing</button></div>
-      ${W() ? `<p class="hint j-wsub">Ideas, drafts, plans, and your quick notes once you put them here. The same notebook as the computer's.</p>` : `<div class="panel j-year"><b>${year}</b><span>${done.filter((l) => l.kind === "book").length} books · ${done.filter((l) => l.kind === "movie").length} films · ${done.filter((l) => l.kind === "show").length} shows finished</span></div>
-      <div class="chips">${[["all", "All"], ...STATUS].map(([k, n]) => `<button data-jstatus="${k}" class="${S.jstatus === k ? "on" : ""}">${n}</button>`).join("")}</div>`}
+    v.innerHTML = `<div class="jv">${seg()}
+      ${W() ? `<div class="jw-top"><button class="jw-quick" id="qNote" title="Quick notes: stay on this phone only"><span class="jw-mic">🎙</span><span><b>Quick note</b><small>Hold to say one · tap to see them${qn.length ? ` (${qn.length})` : ""}</small></span></button></div>
+        <p class="hint j-wsub">Ideas, drafts, plans, and your quick notes once you put them here. The same notebook as the computer's.</p>` : `<div class="panel j-year"><b>${year}</b><span>${done.filter((l) => l.kind === "book").length} books · ${done.filter((l) => l.kind === "movie").length} films · ${done.filter((l) => l.kind === "show").length} shows finished</span></div>
+      ${kinds.length > 1 ? `<div class="chips j-kinds">${[["all", "All types"], ...kinds.map((k) => [k, `${KIND_ICON[k]} ${KIND_PLURAL[k]}`])].map(([k, n]) => `<button data-jkind="${k}" class="${S.jkind === k ? "on" : ""}">${n}</button>`).join("")}</div>` : ""}
+      <div class="chips">${[["all", "All"], ...stList(S.jkind === "all" ? undefined : S.jkind)].map(([k, n]) => `<button data-jstatus="${k}" class="${S.jstatus === k ? "on" : ""}">${n}</button>`).join("")}</div>`}
       <div class="searchrow j-tools"><input id="jq" type="search" placeholder="${W() ? "Search your notebook" : "Search your journal"}" value="${esc(S.jq)}">
-        <button class="btn qn-btn" id="qNote" title="Quick notes: stay on this phone only">✎ Quick${qn.length ? ` <i>${qn.length}</i>` : ""}</button><button class="btn" id="jNew">＋ New</button></div>
-      <div id="jList">${html || `<p class="empty">${S.jq ? "Nothing matches." : W() ? "No pages yet. ＋ New starts one; ✎ Quick notes can be put here too." : "Your journal is empty. Books and films you review on the computer show up here too."}</p>`}
+        <button class="btn" id="jNew">＋ ${W() ? "New page" : "New"}</button></div>
+      <div id="jList">${html || `<p class="empty">${S.jq || (!W() && (S.jkind !== "all" || S.jstatus !== "all")) ? "Nothing matches." : W() ? "No pages yet. ＋ New starts one; ✎ Quick notes can be put here too." : "Your journal is empty. Books and films you review on the computer show up here too."}</p>`}
       ${rows.length > S.limit ? `<button class="btn more" id="more">Show more</button>` : ""}</div></div>`;
   }
   // a journal entry's picture: its own cover (chosen in the journal) first, then the library's, then its kind's icon
@@ -101,7 +193,6 @@ const Journal = (() => {
         w.remove();
         toast(body.remove ? "Cover taken off" : "Cover saved");
         open(l.id);
-        if (S.tab === "journal") render();
       } catch (e) { w.querySelector(".ka-card").classList.remove("busy"); toast(e.offline ? "Choosing a cover needs the computer" : e.message); }
     };
     w.addEventListener("submit", (e) => {
@@ -139,30 +230,31 @@ const Journal = (() => {
     const ents = entriesOf(l), n = ents.length || l.entries || 0, st = statusOf(l);
     const last = ents[ents.length - 1];
     // the ribbon, the last thing you wrote and the day are always there; each journal style shows what it needs
-    return `<button class="row j-row st-${st || "none"}" data-log="${esc(l.id)}">${logCover(l, it)}
-      <span class="t"><b>${esc(l.title)}</b><small>${[st && st !== "finished" ? STATUS.find((s) => s[0] === st)?.[1] : "", l.finished ? fmtDay(l.finished) : "", n ? `${n} ${n === 1 ? "entry" : "entries"}` : ""].filter(Boolean).map(esc).join(" · ")}</small>
+    return `<button class="row j-row st-${st || "none"} k-${l.kind}" data-log="${esc(l.id)}" style="--c:${colorFor(l)};--h:${74 + (xNo(l.title) % 22)}%">${extras(l)}${logCover(l, it)}
+      <span class="t"><b>${esc(l.title)}</b><small>${[st && st !== "finished" ? stName(st, l.kind) : "", l.finished ? fmtDay(l.finished) : "", n ? `${n} ${n === 1 ? "entry" : "entries"}` : ""].filter(Boolean).map(esc).join(" · ")}</small>
         ${last ? `<span class="j-quote">${esc(last.body.slice(0, 140))}${last.body.length > 140 ? "…" : ""}</span>` : ""}</span>
-      ${l.kind === "writing" ? "" : `<em class="j-rib">${esc(STATUS.find((s) => s[0] === st)?.[1] || "In journal")}</em>`}
-      ${l.kind === "movie" && l.score != null ? `<span class="badge j-score">${+l.score}</span>` : ""}</button>`;
+      ${l.kind === "writing" ? "" : `<em class="j-rib">${esc(stName(st, l.kind) || "In journal")}</em>`}
+      ${SCORED(l.kind) && l.score != null ? `<span class="badge j-score">${+l.score}</span>` : ""}</button>`;
   }
 
   function open(id) {
     const l = logById(id);
     if (!l) return;
     openId = l.id;
+    openKey = { item_id: l.item_id, kind: l.kind, title: l.title };
     const it = l.item_id && S.items[l.item_id];
     const st = statusOf(l);
     const ents = entriesOf(l);
     const sh = $("#sheet");
     sh.innerHTML = `<div class="sheet-bar"><button class="back" data-close>‹</button><h2>${esc(l.title)}</h2></div>
       <div class="it-body" style="padding-top:14px">
-        <div class="j-head">${it && !l.cover_v ? `<button class="card" data-item="${it.id}" style="width:96px">${cover(it, false)}</button>` : l.kind === "writing" ? logCover(l, it, "width:96px") : `<button class="card" data-jcover style="width:96px">${logCover(l, it, "width:96px")}</button>`}
+        <div class="j-head">${it && !l.cover_v ? `<button class="card" data-item="${it.id}" style="width:96px">${cover(it, false)}</button>` : `<button class="card" data-jcover style="width:96px">${logCover(l, it, "width:96px")}</button>`}
           <div><h3>${esc(l.title)}</h3><p class="hint">${esc({ book: "Book", movie: "Film", show: "TV show", game: "Game", other: "Other", writing: "Writing notebook" }[l.kind] || "")}${it ? " · in your library" : ""}</p>
-            ${l.kind === "writing" ? "" : `<button class="btn sm" data-jcover>🖼 ${l.cover_v || it?.has_cover ? "Change the cover" : "Add a cover"}</button>`}</div></div>
-        ${l.kind === "writing" ? "" : `<div class="chips j-status">${STATUS.map(([k, n]) => `<button data-jset="${k}" class="${st === k ? "on" : ""}">${n}</button>`).join("")}</div>
+            <button class="btn sm" data-jcover>🖼 ${l.cover_v || it?.has_cover ? "Change the cover" : "Add a cover"}</button></div></div>
+        ${l.kind === "writing" ? "" : `<div class="chips j-status">${stList(l.kind).map(([k, n]) => `<button data-jset="${k}" class="${st === k ? "on" : ""}">${n}</button>`).join("")}</div>
         <div class="j-fields">
           <label class="field"><span>Finished on</span><input type="date" id="jFin" value="${esc(l.finished || "")}"></label>
-          ${l.kind === "movie" ? `<label class="field"><span>My score (out of 10)</span><input type="number" id="jScore" min="0" max="10" step="0.5" value="${l.score ?? ""}" placeholder="–"></label>` : ""}
+          ${SCORED(l.kind) ? `<label class="field"><span>My score (out of 10)</span><input type="number" id="jScore" min="0" max="10" step="0.5" value="${l.score ?? ""}" placeholder="–"></label>` : ""}
         </div>`}
         <h3 style="margin:16px 0 6px">${l.kind === "writing" ? "Entries" : "Review"}</h3>
         ${ents.map((e) => `<div class="note j-entry" data-entry="${esc(e.id)}"><small class="hint">${new Date((e.created_at || 0) * 1000).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })}</small>
@@ -274,7 +366,7 @@ const Journal = (() => {
       <div class="it-body" style="padding-top:14px">
         <label class="field"><span>Title</span><input id="nTitle" placeholder="A book, film, show or game"></label>
         <label class="field"><span>What is it?</span><select id="nKind"><option value="book">Book</option><option value="movie">Film</option><option value="show">TV show</option><option value="game">Game</option><option value="other">✦ A note (not media)</option></select></label>
-        <div class="chips" id="nStatus">${STATUS.map(([k, n]) => `<button data-nstatus="${k}" class="${k === "reading" ? "on" : ""}">${n}</button>`).join("")}</div>
+        <div class="chips" id="nStatus">${stList("book").map(([k, n]) => `<button data-nstatus="${k}" class="${k === "reading" ? "on" : ""}">${n}</button>`).join("")}</div>
         <button class="btn primary" id="nMake">Add to journal</button></div>`;
     sh.hidden = false;
   }
@@ -283,7 +375,34 @@ const Journal = (() => {
     const t = e.target;
     if (Dictate.active && t.closest("#jAdd, #qAdd, [data-jsave], [data-jcancel], [data-qsave], [data-close]")) Dictate.end();     // done with that box
     const js = t.closest("[data-jstatus]"); if (js) { S.jstatus = js.dataset.jstatus; S.limit = 60; return window.render(); }
-    const jb = t.closest("[data-jbook]"); if (jb) { BOOK = jb.dataset.jbook; store("jbook.json", BOOK); S.jq = ""; S.limit = 60; return window.render(); }
+    const jk = t.closest("[data-jkind]"); if (jk) { S.jkind = jk.dataset.jkind; S.limit = 60; return window.render(); }
+    const jp = t.closest("[data-jpage]"); if (jp) { setPage(jp.dataset.jpage); scoring = null; S.jq = ""; S.limit = 60; $("#view").scrollTop = 0; return window.render(); }
+    // (Now) the one-tap buttons on a card
+    const qa = t.closest("[data-jq]");
+    if (qa) {
+      const l = logById(qa.dataset.jid); if (!l) return;
+      const a = qa.dataset.jq;
+      if (a === "state") {
+        if (confirming !== String(l.id)) {       // first tap: ask (it forgets after a few seconds)
+          confirming = String(l.id); clearTimeout(confirmT);
+          confirmT = setTimeout(() => { confirming = null; if (S.tab === "journal" && PAGE === "now") window.render(); }, 6000);
+          return window.render();
+        }
+        confirming = null; clearTimeout(confirmT);
+        if (statusOf(l) === "next") { setFields(l, { status: "reading" }); toast(`${l.title}: ${stName("reading", l.kind).toLowerCase()}`); }
+        else { setFields(l, { status: "finished", finished: l.finished || today() }); toast(`✓ ${l.title}: finished`); }
+        return window.render();
+      }
+      confirming = null;
+      if (a === "done") { setFields(l, { status: "finished", finished: l.finished || today() }); toast(`✓ ${l.title}: finished`); }
+      else if (a === "hold") { setFields(l, { status: "hold" }); toast(`${l.title}: on hold`); }
+      else if (a === "start") { setFields(l, { status: "reading" }); toast(`${l.title}: ${stName("reading", l.kind).toLowerCase()}`); }
+      else if (a === "drop-next") { setFields(l, { status: "" }); toast(`${l.title}: off Up next`); }
+      else if (a === "score") { scoring = scoring === String(l.id) ? null : String(l.id); }
+      return window.render();
+    }
+    const sc = t.closest("[data-jscore]");
+    if (sc) { const l = logById(sc.dataset.jid); if (l) { setFields(l, { score: sc.dataset.jscore === "" ? null : Number(sc.dataset.jscore) }); scoring = null; toast(sc.dataset.jscore ? `★ ${sc.dataset.jscore} for ${l.title}` : "Score taken off"); } return window.render(); }
     if (t.closest("#qCollect")) {          // the quick notes become dated entries on the writing notebook's "Quick notes" page
       const list = quick();
       if (!list.length) return;
@@ -303,11 +422,11 @@ const Journal = (() => {
       l.updated_at = now();
       saveQuick([]);
       toast(`${list.length} quick ${list.length === 1 ? "note" : "notes"} put in the writing notebook`);
-      BOOK = "writing"; store("jbook.json", BOOK);
+      setPage("write");
       return open(l.id);
     }
     const lg = t.closest("[data-log]"); if (lg) return open(lg.dataset.log);
-    if (t.closest("[data-jcover]") && openId != null) { const l = logById(openId); if (l) coverPicker(l); return; }
+    if (t.closest("[data-jcover]") && openId != null) { const l = openLog(); if (l) coverPicker(l); return; }
     if (t.closest("#jNew")) return newLog();
     if (t.closest("#qNote")) { if (skipQuickClick) { skipQuickClick = false; return; } return openQuick(); }
     if (t.closest("#qAdd")) {
@@ -355,7 +474,7 @@ const Journal = (() => {
       jop({ op: "log_new", cid: c, fields });
       return open("c:" + c);
     }
-    const l = openId != null && logById(openId);
+    const l = openLog();
     if (!l || $("#sheet").hidden) return;
     const set = t.closest("[data-jset]");
     if (set) { const k = set.dataset.jset; setFields(l, { status: k, ...(k === "finished" && !l.finished ? { finished: today() } : {}) }); return open(l.id); }
@@ -396,8 +515,8 @@ const Journal = (() => {
     }
   });
   document.addEventListener("change", (e) => {
-    if (e.target.id === "nKind") { const s = $("#nStatus"); if (s) s.hidden = e.target.value === "other"; return; }
-    const l = openId != null && logById(openId);
+    if (e.target.id === "nKind") { const s = $("#nStatus"); if (s) { s.hidden = e.target.value === "other"; const rd = s.querySelector("[data-nstatus=reading]"); if (rd) rd.textContent = stName("reading", e.target.value); } return; }
+    const l = openLog();
     if (!l) return;
     if (e.target.id === "jFin") setFields(l, { finished: e.target.value || null, ...(e.target.value ? { status: "finished" } : {}) });
     if (e.target.id === "jScore") setFields(l, { score: e.target.value === "" ? null : Math.max(0, Math.min(10, Number(e.target.value))) });
@@ -411,5 +530,5 @@ const Journal = (() => {
     }
   });
 
-  return { render, open, forItem, quick: openQuick, isOpen: () => openId != null && !$("#sheet").hidden, close: () => { openId = null; } };
+  return { render, open, forItem, remap, setStatus, statusOf, STATUS, quick: openQuick, isOpen: () => openId != null && !$("#sheet").hidden, close: () => { openId = null; openKey = null; } };
 })();

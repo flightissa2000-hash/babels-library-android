@@ -1,0 +1,30 @@
+/* Galaxy on the phone: the computer's palette (css/galaxy.css, copied in when the app is built) plus a real photograph of
+   space behind each tab, and see-through panels so it shows between things.
+   Photos: NASA, ESA, CSA, STScI (Webb) and NASA, ESA (Hubble), via ESA/Webb and ESA/Hubble, CC BY 4.0. */
+html[data-theme=galaxy]{--surface:rgba(16,21,50,.76);--bar-bg:rgba(8,11,30,.82);--field-bg:rgba(6,8,22,.72)}
+html[data-theme=galaxy] body::before{
+  background-image:linear-gradient(180deg,rgba(4,6,18,.12) 0,rgba(4,6,18,.45) 45%,rgba(4,6,18,.78) 100%),url("../sky/photos/tarantula.jpg");
+  background-size:auto,cover;background-position:0 0,center 40%;background-repeat:no-repeat;background-attachment:fixed}
+html[data-theme=galaxy][data-g-tab=home] body::before{background-image:linear-gradient(180deg,rgba(4,6,18,.1) 0,rgba(4,6,18,.45) 45%,rgba(4,6,18,.78) 100%),url("../sky/photos/cosmic-cliffs.jpg");background-position:0 0,40% 80%}
+html[data-theme=galaxy][data-g-tab=library][data-g-area=books] body::before{background-image:linear-gradient(180deg,rgba(4,6,18,.1) 0,rgba(4,6,18,.45) 45%,rgba(4,6,18,.78) 100%),url("../sky/photos/pillars.jpg");background-position:0 0,center 35%}
+html[data-theme=galaxy][data-g-tab=library][data-g-area=articles] body::before{background-image:linear-gradient(180deg,rgba(4,6,18,.1) 0,rgba(4,6,18,.45) 45%,rgba(4,6,18,.78) 100%),url("../sky/photos/stephans-quintet.jpg");background-position:0 0,60% 40%}
+html[data-theme=galaxy][data-g-tab=library][data-g-area=music] body::before{background-image:linear-gradient(180deg,rgba(4,6,18,.1) 0,rgba(4,6,18,.45) 45%,rgba(4,6,18,.78) 100%),url("../sky/photos/whirlpool.jpg");background-position:0 0,35% 50%}
+html[data-theme=galaxy][data-g-tab=library][data-g-area=video] body::before{background-image:linear-gradient(180deg,rgba(4,6,18,.1) 0,rgba(4,6,18,.45) 45%,rgba(4,6,18,.78) 100%),url("../sky/photos/orion.jpg");background-position:0 0,center 35%}
+html[data-theme=galaxy][data-g-tab=journal] body::before{background-image:linear-gradient(180deg,rgba(4,6,18,.2) 0,rgba(4,6,18,.55) 45%,rgba(4,6,18,.82) 100%),url("../sky/photos/whirlpool.jpg");background-position:0 0,30% 50%}
+/* glass: panels and rows let the photo through, blurred */
+html[data-theme=galaxy] .panel,html[data-theme=galaxy] .ll-row,html[data-theme=galaxy] .lb-col,html[data-theme=galaxy] .lq-row,html[data-theme=galaxy] .li-letter,
+html[data-theme=galaxy] .lz-card,html[data-theme=galaxy] .ll-menu{backdrop-filter:blur(12px) saturate(1.2);-webkit-backdrop-filter:blur(12px) saturate(1.2);border-color:rgba(150,170,255,.18)}
+html[data-theme=galaxy] .lq-head,html[data-theme=galaxy] .li-az{background:rgba(8,11,30,.82);backdrop-filter:blur(10px)}
+html[data-theme=galaxy] .lq-row{background:rgba(10,13,34,.45)}
+html[data-theme=galaxy] .lb-card{background:rgba(6,8,22,.55)}
+html[data-theme=galaxy] .ll-cork{background:rgba(26,20,64,.5) radial-gradient(rgba(255,255,255,.14) 1px,transparent 1.5px) 0 0/9px 9px;box-shadow:inset 0 0 0 8px rgba(42,33,96,.75)}
+html[data-theme=galaxy] .ll h3,html[data-theme=galaxy] h2,html[data-theme=galaxy] h3{text-shadow:0 1px 8px rgba(0,0,0,.8)}
+html[data-theme=galaxy] .btn.primary{background:linear-gradient(135deg,#9b8cff,#6f86ff);color:#fff;box-shadow:0 0 18px rgba(155,140,255,.35)}
+/* the Bulletin over the Cosmic Cliffs: no dark backdrop of its own, the words carry a shadow instead */
+html[data-theme=galaxy] .btm{background:transparent;text-shadow:0 1px 3px rgba(0,0,0,.75),0 0 14px rgba(0,0,0,.45)}
+html[data-theme=galaxy] .btm .btm-bg{display:none}
+html[data-theme=galaxy] .btm .btm-cover::before{background:radial-gradient(ellipse at 60% 45%,rgba(4,6,18,.38),rgba(4,6,18,.08) 70%)}
+html[data-theme=galaxy] .btm .btm-cover::after{display:none}
+html[data-theme=galaxy] .btm .btm-sec,html[data-theme=galaxy] .btm .btm-hot,html[data-theme=galaxy] .btm .btm-wire,html[data-theme=galaxy] .btm .btm-labs,
+html[data-theme=galaxy] .btm .btm-lab,html[data-theme=galaxy] .btm .btm-qotd,html[data-theme=galaxy] .btm .btm-tfa{background:rgba(4,6,18,.22)}
+html[data-theme=galaxy] .btm header h3,html[data-theme=galaxy] .btm .btm-title b,html[data-theme=galaxy] .btm .btm-num{text-shadow:none;filter:drop-shadow(0 2px 8px rgba(0,0,0,.85))}

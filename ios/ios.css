@@ -15,3 +15,5 @@ input,select,textarea{font-size:16px}              /* (smaller text makes Safari
 .web-addr{margin-top:12px}
 .web-addr summary{color:var(--ink-soft);font-weight:700;font-size:.85rem}
 .web-addr .field{margin-top:8px}
+/* the iPhone's own status bar shows the time just above: no second clock in the top line */
+#clock{display:none}

@@ -24,6 +24,13 @@ shutil.copytree(os.path.join(root, "web"), out)
 # what the page shares with the computer app (the same as the Android build)
 shutil.copy(os.path.join(desk, "css", "themes.css"), os.path.join(out, "css", "themes.css"))
 shutil.copy(os.path.join(desk, "js", "themes.js"), os.path.join(out, "js", "themes.js"))
+# the Galaxy theme's palette and the star chart are shared with the computer too
+shutil.copy(os.path.join(desk, "css", "galaxy.css"), os.path.join(out, "css", "galaxy.css"))
+shutil.copy(os.path.join(desk, "css", "sky.css"), os.path.join(out, "css", "sky.css"))
+shutil.copy(os.path.join(desk, "js", "sky.js"), os.path.join(out, "js", "sky.js"))
+os.makedirs(os.path.join(out, "sky"), exist_ok=True)
+for f in ("sky.json", "milkyway.jpg"):
+    shutil.copy(os.path.join(desk, "sky", f), os.path.join(out, "sky", f))
 os.makedirs(os.path.join(out, "vendor", "fonts"), exist_ok=True)
 for f in ("pdf.min.js", "pdf.worker.min.js", "epub.min.js", "jszip.min.js"):
     shutil.copy(os.path.join(desk, "vendor", f), os.path.join(out, "vendor", f))

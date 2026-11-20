@@ -54,6 +54,7 @@ const Online = (() => {
   const keyOf = (path) => "nc-" + (path.length > 120 ? path.slice(0, 80) + Array.from(path).reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) : path).replace(/[^a-z0-9]+/gi, "_") + ".json";
   function remember(method, path, data) {
     if (method !== "GET" || !KEEP.test(path)) return;
+    if (data && (data.pending || (Array.isArray(data.items) && !data.items.length))) return;      // (a list still being filled in: keep the last full one)
     try { store(keyOf(path.replace(/[?&]fresh=1/, "")), { at: now(), data }); } catch (e) {}
     if (path.startsWith("/sync/news/local") && data && data.place) store("newsplace.json", data.place);
   }
@@ -448,5 +449,5 @@ const Online = (() => {
     return { text: q.slice(0, 900), by: m[2].slice(0, 120), page: "https://en.wikiquote.org/wiki/" + encodeURIComponent(m[2].replace(/ /g, "_")) };
   }
 
-  return { handles, answer, remember, flush };
+  return { handles, answer, remember, flush, recall: (path) => { try { return recalled(path); } catch (e) { return null; } } };
 })();

@@ -47,12 +47,18 @@ import java.util.zip.GZIPInputStream;
  */
 public class BrowserPanel extends android.content.ContextWrapper {
     private final Activity act;                          // the app's screen it lives in
+    final boolean mail;                                  // the Mail tab's browser
+    private String openKey() { return mail ? "mail_url" : "open_url"; }
+    private String titleKey() { return mail ? "mail_title" : "open_title"; }
     private final android.widget.FrameLayout screen;     // the whole screen (a full-screen video goes here)
     Runnable onClosed;                                   // ✕ on the last page: the app shows the Browser tab's start page
 
     /** The browser, opening a page (or the page you had, from saved): add view() to the screen. */
-    BrowserPanel(Activity act, android.widget.FrameLayout screen, String url, Bundle saved) {
+    BrowserPanel(Activity act, android.widget.FrameLayout screen, String url, Bundle saved) { this(act, screen, url, saved, false); }
+    /** mail = the Mail tab's own browser (Gmail): kept apart from the Browser tab's, not in your history */
+    BrowserPanel(Activity act, android.widget.FrameLayout screen, String url, Bundle saved, boolean mail) {
         super(act);
+        this.mail = mail;
         this.act = act;
         this.screen = screen;
         build(url, saved);
@@ -99,6 +105,118 @@ public class BrowserPanel extends android.content.ContextWrapper {
 
     static File historyFile(Context c) { return new File(c.getFilesDir(), "browser_history.json"); }
     static File blockFile(Context c) { return new File(c.getFilesDir(), "adblock.json.gz"); }
+
+    // ---- privacy: cookies and site data (the app's own page is never touched: it isn't a website)
+    private static boolean ownOrigin(String origin) { return origin != null && origin.contains("appassets.androidplatform.net"); }
+
+    /** What a site keeps in the page itself (localStorage, IndexedDB, its offline caches and service workers) can only
+     *  be cleared from inside that site: a hidden page is opened "as" each site, with nothing loaded from the internet,
+     *  and clears it. Origins are done one after another. (UI thread) */
+    private static final String WIPE = "<!doctype html><script>(async()=>{try{localStorage.clear()}catch(e){}try{sessionStorage.clear()}catch(e){}"
+            + "try{if(indexedDB.databases){for(const d of await indexedDB.databases())indexedDB.deleteDatabase(d.name)}}catch(e){}"
+            + "try{if(window.caches){for(const k of await caches.keys())await caches.delete(k)}}catch(e){}"
+            + "try{if(navigator.serviceWorker){for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister()}}catch(e){}"
+            + "document.title='wiped'})()</script>";
+    static void wipeStorage(Context c, java.util.List<String> origins) {
+        if (origins.isEmpty()) return;
+        final WebView w = new WebView(c);
+        // (a page only runs while it's on a screen: an invisible dot on the app's)
+        final android.view.ViewGroup root = c instanceof Activity ? (android.view.ViewGroup) ((Activity) c).findViewById(android.R.id.content) : null;
+        if (root != null) { w.setAlpha(0f); root.addView(w, new android.view.ViewGroup.LayoutParams(1, 1)); }
+        w.getSettings().setJavaScriptEnabled(true);
+        w.getSettings().setDomStorageEnabled(true);
+        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        final java.util.Iterator<String> it = new java.util.ArrayList<>(origins).iterator();
+        final Runnable[] next = new Runnable[1];
+        next[0] = () -> {
+            h.removeCallbacksAndMessages(null);
+            if (!it.hasNext()) { if (root != null) root.removeView(w); w.destroy(); return; }
+            String o = it.next();
+            w.loadDataWithBaseURL(o + "/", WIPE, "text/html", "utf-8", null);
+            h.postDelayed(next[0], 2500);          // (in case a page never answers)
+        };
+        w.setWebChromeClient(new WebChromeClient() {
+            @Override public void onReceivedTitle(WebView v, String t) { if ("wiped".equals(t)) h.post(next[0]); }
+        });
+        w.setWebViewClient(new WebViewClient() {           // (the page itself asks for nothing; anything else is refused)
+            @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) { return true; }
+        });
+        next[0].run();
+    }
+    private static java.util.List<String> originsOf(java.util.Collection<String> hosts) {
+        java.util.List<String> o = new java.util.ArrayList<>();
+        for (String h : hosts) if (h != null && h.matches("[A-Za-z0-9.-]+")) { o.add("https://" + h); o.add("http://" + h); }
+        return o;
+    }
+
+    /** every cookie, and what sites kept on the phone (their storage, the cache, form entries); hosts = the sites in
+     *  your history, whose in-page storage is cleared too */
+    static void clearAllSiteData(Context c, JSONArray hosts) {
+        Set<String> hs = new HashSet<>();
+        for (int i = 0; hosts != null && i < hosts.length(); i++) hs.add(hosts.optString(i));
+        wipeStorage(c, originsOf(hs));
+        CookieManager cm = CookieManager.getInstance();
+        cm.removeAllCookies(null);
+        cm.flush();
+        android.webkit.WebStorage ws = android.webkit.WebStorage.getInstance();
+        ws.getOrigins(m -> {
+            if (m == null) return;
+            for (Object k : m.keySet()) { String o = String.valueOf(k); if (!ownOrigin(o)) ws.deleteOrigin(o); }
+        });
+        try { android.webkit.WebViewDatabase.getInstance(c).clearHttpAuthUsernamePassword(); } catch (Exception ignored) { }
+        try { android.webkit.WebViewDatabase.getInstance(c).clearFormData(); } catch (Exception ignored) { }
+        BrowserPanel b = current();
+        if (b != null) {
+            for (WebView w : new WebView[]{b.webA, b.webB}) if (w != null) { w.clearCache(true); w.clearFormData(); }
+        }
+    }
+
+    /** one website forgotten: its cookies and its stored data (its pages come off the history in the app) */
+    static void forgetSite(Context c, String site, JSONArray hosts) {
+        CookieManager cm = CookieManager.getInstance();
+        Set<String> all = new HashSet<>();
+        all.add(site); all.add("www." + site);
+        for (int i = 0; hosts != null && i < hosts.length(); i++) all.add(hosts.optString(i));
+        Set<String> domains = new HashSet<>();
+        for (String h : all) {
+            if (h == null || h.isEmpty()) continue;
+            // every level from the host up to the site (cookies set for .site count for all of them)
+            String[] p = h.split("\\.");
+            for (int i = 0; i < p.length - 1; i++) {
+                StringBuilder b = new StringBuilder();
+                for (int j = i; j < p.length; j++) { if (b.length() > 0) b.append('.'); b.append(p[j]); }
+                String d = b.toString();
+                if (d.equals(site) || d.endsWith("." + site)) domains.add(d);
+            }
+        }
+        for (String d : domains) {
+            for (String scheme : new String[]{"https://", "http://"}) {
+                String url = scheme + d + "/";
+                String got = cm.getCookie(url);
+                if (got == null) continue;
+                for (String part : got.split(";")) {
+                    String name = part.split("=", 2)[0].trim();
+                    if (name.isEmpty()) continue;
+                    String gone = name + "=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+                    cm.setCookie(url, gone + "; Path=/");
+                    for (String dd : domains) cm.setCookie(url, gone + "; Path=/; Domain=" + dd);
+                    cm.setCookie(url, gone + "; Path=/; Domain=." + site);
+                }
+            }
+        }
+        cm.flush();
+        Set<String> hs = new HashSet<>(all);
+        hs.addAll(domains);
+        wipeStorage(c, originsOf(hs));
+        android.webkit.WebStorage ws = android.webkit.WebStorage.getInstance();
+        ws.getOrigins(m -> {
+            if (m == null) return;
+            for (Object k : m.keySet()) {
+                String o = String.valueOf(k), h = Uri.parse(o).getHost();
+                if (!ownOrigin(o) && h != null && (h.equals(site) || h.endsWith("." + site))) ws.deleteOrigin(o);
+            }
+        });
+    }
 
     /** Read the block lists the app fetched from the computer (once per run, in the background). */
     static void loadBlocklist(Context c) {
@@ -424,7 +542,7 @@ public class BrowserPanel extends android.content.ContextWrapper {
         // page that was open when the app was last closed
         if (saved != null && webA.restoreState(saved) != null) { refreshBar(); return; }
         String start = startUrl;
-        if (start == null || start.isEmpty()) start = getSharedPreferences("browser", MODE_PRIVATE).getString("open_url", "");
+        if (start == null || start.isEmpty()) start = getSharedPreferences("browser", MODE_PRIVATE).getString(openKey(), "");
         go(start == null ? "" : start);
     }
 
@@ -855,7 +973,7 @@ public class BrowserPanel extends android.content.ContextWrapper {
         where.setText(h == null ? "" : h.replaceFirst("^www\\.", ""));
         if (web == webA) { curUrl = url; curTitle = web.getTitle() == null ? "" : web.getTitle(); }
         if (url.startsWith("http") && webB == null)       // (remembered: the page comes back if Android closes the browser while you're away)
-            getSharedPreferences("browser", MODE_PRIVATE).edit().putString("open_url", url).putString("open_title", web.getTitle() == null ? "" : web.getTitle()).apply();
+            getSharedPreferences("browser", MODE_PRIVATE).edit().putString(openKey(), url).putString(titleKey(), web.getTitle() == null ? "" : web.getTitle()).apply();
         progress.setProgress(web.getProgress());
         progress.setVisibility(web.getProgress() >= 100 ? View.INVISIBLE : View.VISIBLE);
         // ☆/★: is this page bookmarked? 🔑: only shows on a site you have a saved password for
@@ -872,7 +990,7 @@ public class BrowserPanel extends android.content.ContextWrapper {
      *  browser's start page (the app's Browser tab), not wherever the browser was opened from. */
     private void closeTab() {
         if (webB != null) { setActive(web == webA ? webB : webA); unsplit(); return; }
-        getSharedPreferences("browser", MODE_PRIVATE).edit().remove("open_url").remove("open_title").apply();
+        getSharedPreferences("browser", MODE_PRIVATE).edit().remove(openKey()).remove(titleKey()).apply();
         if (onClosed != null) onClosed.run();
     }
 
@@ -954,8 +1072,9 @@ public class BrowserPanel extends android.content.ContextWrapper {
 
     /** ⧉: a second page under this one (like Firefox's split view); pressed again, back to one: the half you're using stays.
      *  ⇄ (swap): a second page in place of this one; pressed again, back to the other (✕ closes the one you're on). */
-    private void split() {
-        if (swapMode) { swap(); return; }
+    private void split() { split(null); }
+    private void split(String url) {
+        if (swapMode) { swap(url); return; }
         if (webB == null) {
             webB = makeWeb();
             boxB = box(webB);
@@ -984,14 +1103,15 @@ public class BrowserPanel extends android.content.ContextWrapper {
             splitBtn.setAlpha(1f);
             splitBtn.setText("▣");
             setActive(webB);
-            webB.loadDataWithBaseURL("https://babel.invalid/", pickerHtml(), "text/html", "utf-8", null);
-            address.requestFocus();
+            if (url != null) webB.loadUrl(url);
+            else { webB.loadDataWithBaseURL("https://babel.invalid/", pickerHtml(), "text/html", "utf-8", null); address.requestFocus(); }
             return;
         }
         unsplit();
     }
 
-    private void swap() {
+    private void swap() { swap(null); }
+    private void swap(String url) {
         if (webB == null) {
             webB = makeWeb();
             boxB = box(webB);
@@ -999,8 +1119,8 @@ public class BrowserPanel extends android.content.ContextWrapper {
             boxA.setVisibility(View.GONE);
             setActive(webB);
             paintSwap();
-            webB.loadDataWithBaseURL("https://babel.invalid/", pickerHtml(), "text/html", "utf-8", null);
-            address.requestFocus();
+            if (url != null) webB.loadUrl(url);
+            else { webB.loadDataWithBaseURL("https://babel.invalid/", pickerHtml(), "text/html", "utf-8", null); address.requestFocus(); }
             return;
         }
         boolean toA = web == webB;
@@ -1010,6 +1130,28 @@ public class BrowserPanel extends android.content.ContextWrapper {
         address.clearFocus();
         setActive(toA ? webA : webB);
         paintSwap();
+    }
+
+    /** A link that opens "in a new tab": it opens in the other page's spot (the second page; made if there isn't one),
+     *  and that page comes to the front. The page you were on stays as it was. */
+    private void openInOther(WebView from, String url) {
+        if (isFinishing() || url == null || url.isEmpty() || url.startsWith("about:")) return;
+        if (webB == null) {
+            if (from != webA) setActive(webA);
+            if (swapMode) swap(url); else split(url);
+            return;
+        }
+        WebView other = from == webA ? webB : webA;
+        other.loadUrl(url);
+        if (swapMode) {
+            boolean toA = other == webA;
+            boxA.setVisibility(toA ? View.VISIBLE : View.GONE);
+            boxB.setVisibility(toA ? View.GONE : View.VISIBLE);
+            editing = false;
+            address.clearFocus();
+            setActive(other);
+            paintSwap();
+        } else setActive(other);
     }
 
     /** ⇄ says which page you're on: 1 or 2 */
@@ -1033,27 +1175,51 @@ public class BrowserPanel extends android.content.ContextWrapper {
         setActive(keep);
     }
 
-    /** What the new half shows first: your latest pages, or type in the bar. */
+    /** What the new half shows first: your bookmarks (the computer's list); with none yet, your latest pages. */
     private String pickerHtml() {
         StringBuilder rows = new StringBuilder();
+        String here = webA.getUrl() == null ? "" : webA.getUrl();
+        int marks = 0;
         try {
-            JSONArray a = new JSONArray(readHistory(this));
+            JSONArray a = new JSONArray(readBookmarks(this));
             Set<String> seen = new HashSet<>();
-            String here = webA.getUrl() == null ? "" : webA.getUrl();
-            for (int i = a.length() - 1; i >= 0 && seen.size() < 8; i--) {
+            for (int i = 0; i < a.length(); i++) {
                 JSONObject o = a.getJSONObject(i);
                 String u = o.optString("url");
-                if (u.isEmpty() || u.equals(here) || !seen.add(u)) continue;
-                String t = o.optString("title", u);
-                rows.append("<a href=\"").append(android.text.TextUtils.htmlEncode(u)).append("\"><b>").append(android.text.TextUtils.htmlEncode(t))
-                        .append("</b><small>").append(android.text.TextUtils.htmlEncode(Uri.parse(u).getHost() == null ? u : Uri.parse(u).getHost())).append("</small></a>");
+                if (u.isEmpty() || !seen.add(u)) continue;
+                rows.append(pickRow(u, o.optString("title", "")));
+                marks++;
             }
         } catch (Exception ignored) { }
+        if (marks == 0) {
+            try {
+                JSONArray a = new JSONArray(readHistory(this));
+                Set<String> seen = new HashSet<>();
+                for (int i = a.length() - 1; i >= 0 && seen.size() < 8; i--) {
+                    JSONObject o = a.getJSONObject(i);
+                    String u = o.optString("url");
+                    if (u.isEmpty() || u.equals(here) || !seen.add(u)) continue;
+                    rows.append(pickRow(u, o.optString("title", u)));
+                }
+            } catch (Exception ignored) { }
+        }
         String on = String.format("#%06X", markOn & 0xFFFFFF);
-        return "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><style>body{margin:0;padding:18px 16px;font:15px system-ui,sans-serif;background:#f6f7fb;color:#1b2340}"
-                + "h1{font-size:1.15rem;margin:0 0 4px}p{margin:0 0 14px;color:#5b6b86;font-size:.9rem}a{display:flex;flex-direction:column;gap:2px;padding:11px 14px;margin-bottom:8px;border-radius:14px;background:#fff;color:inherit;text-decoration:none;border-left:5px solid " + on + ";box-shadow:0 2px 8px rgba(0,0,0,.08)}"
-                + "b{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}small{color:#7a869e}</style>"
-                + "<h1>" + (swapMode ? "Your second page" : "The other half") + "</h1><p>" + "Search or type an address in the bar above" + (rows.length() > 0 ? ", or pick one of your latest pages:" : ".") + "</p>" + rows;
+        String lead = marks > 0 ? "Search or type an address in the bar above, or open one of your bookmarks:"
+                : "You have no bookmarks yet (☆ on the bar adds the page you're on)." + (rows.length() > 0 ? " Your latest pages:" : "");
+        return "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><style>body{margin:0;padding:18px 16px 30px;font:15px system-ui,sans-serif;background:#f6f7fb;color:#1b2340}"
+                + "h1{font-size:1.15rem;margin:0 0 4px}p{margin:0 0 14px;color:#5b6b86;font-size:.9rem}"
+                + "a{display:flex;align-items:center;gap:12px;padding:10px 14px;margin-bottom:8px;border-radius:14px;background:#fff;color:inherit;text-decoration:none;box-shadow:0 2px 8px rgba(0,0,0,.08)}"
+                + "a i{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:" + on + ";color:#fff;font:700 1rem system-ui,sans-serif;font-style:normal}"
+                + "a span{display:flex;flex-direction:column;gap:2px;min-width:0}"
+                + "b{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}small{color:#7a869e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}</style>"
+                + "<h1>" + (marks > 0 ? "★ Your bookmarks" : swapMode ? "Your second page" : "The other half") + "</h1><p>" + lead + "</p>" + rows;
+    }
+    private static String pickRow(String u, String title) {
+        String host = Uri.parse(u).getHost() == null ? u : Uri.parse(u).getHost().replaceFirst("^(www|m)\\.", "");
+        String t = title == null || title.isEmpty() ? host : title;
+        String letter = host.isEmpty() ? "★" : host.substring(0, 1).toUpperCase();
+        return "<a href=\"" + android.text.TextUtils.htmlEncode(u) + "\"><i>" + android.text.TextUtils.htmlEncode(letter) + "</i><span><b>"
+                + android.text.TextUtils.htmlEncode(t) + "</b><small>" + android.text.TextUtils.htmlEncode(host) + "</small></span></a>";
     }
 
     /** The engine pauses a page's video as soon as its window is hidden (screen off, another app): while something
@@ -1071,11 +1237,14 @@ public class BrowserPanel extends android.content.ContextWrapper {
 
     private WebView makeWeb() {
         WebView web = new PageView(this);
+        // the Mail tab: Google only lets you sign in from a full browser, so the page is told this is Chrome (it is the
+        // same engine) rather than an app's built-in page
+        if (mail) web.getSettings().setUserAgentString(web.getSettings().getUserAgentString().replace("; wv)", ")").replaceAll("Version/[\\d.]+ ", ""));
         web.setOnTouchListener((v, e) -> { if (e.getAction() == android.view.MotionEvent.ACTION_DOWN && v != this.web) setActive((WebView) v); return false; });
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
-        s.setSupportMultipleWindows(false);                  // "open in a new tab" links open here (one tab)
+        s.setSupportMultipleWindows(true);                   // "open in a new tab" links open in the other page's spot (onCreateWindow)
         s.setJavaScriptCanOpenWindowsAutomatically(false);   // pages can't open pop-ups by themselves
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
@@ -1083,11 +1252,36 @@ public class BrowserPanel extends android.content.ContextWrapper {
         s.setDisplayZoomControls(false);
         s.setMediaPlaybackRequiresUserGesture(true);
         CookieManager.getInstance().setAcceptCookie(true);
+        // downloads: a file link goes to Android's own downloader (into Downloads, with its notification); a file the page
+        // made itself (blob: or data:) is read out of the page and saved to Downloads here
+        web.setDownloadListener((url, ua, disposition, mime, length) -> download(web, url, ua, disposition, mime));
+        web.addJavascriptInterface(new Saver(), "BabelSaver");
         web.setWebChromeClient(new WebChromeClient() {
             @Override public void onProgressChanged(WebView v, int p) { if (v != BrowserPanel.this.web) return; progress.setProgress(p); progress.setVisibility(p >= 100 ? View.INVISIBLE : View.VISIBLE); }
             @Override public void onReceivedTitle(WebView v, String title) { remember(v.getUrl(), title); }
             @Override public void onShowCustomView(View view, CustomViewCallback cb) { showFull(view, cb); }
             @Override public void onHideCustomView() { hideFull(); }
+            // a link meant for a new tab (you tapped it; pop-ups that open by themselves are still refused): a stand-in
+            // page catches the address and it opens in the other page's spot
+            @Override public boolean onCreateWindow(WebView v, boolean dialog, boolean gesture, android.os.Message msg) {
+                if (!gesture || dialog) return false;
+                final WebView from = v;
+                final WebView catcher = new WebView(BrowserPanel.this);
+                final boolean[] done = {false};
+                catcher.setWebViewClient(new WebViewClient() {
+                    private void take(String u) {
+                        if (done[0] || u == null || u.isEmpty() || u.startsWith("about:")) return;
+                        done[0] = true;
+                        ui.post(() -> { openInOther(from, u); catcher.stopLoading(); catcher.destroy(); });
+                    }
+                    @Override public boolean shouldOverrideUrlLoading(WebView w, WebResourceRequest r) { take(r.getUrl().toString()); return true; }
+                    @Override public void onPageStarted(WebView w, String u, Bitmap icon) { take(u); }
+                });
+                ui.postDelayed(() -> { if (!done[0]) { done[0] = true; catcher.destroy(); } }, 15000);
+                ((WebView.WebViewTransport) msg.obj).setWebView(catcher);
+                msg.sendToTarget();
+                return true;
+            }
         });
         web.setWebViewClient(new WebViewClient() {
             @Override
@@ -1095,6 +1289,10 @@ public class BrowserPanel extends android.content.ContextWrapper {
                 Uri u = r.getUrl();
                 String scheme = u.getScheme() == null ? "" : u.getScheme();
                 if (scheme.equals("http") || scheme.equals("https")) {
+                    if (r.isForMainFrame() && timeUp(BrowserPanel.this, u.getHost())) {   // (its time is used up today)
+                        showTimeUp(v, limitedDomain(BrowserPanel.this, u.getHost()));
+                        return true;
+                    }
                     if (r.isForMainFrame()) going.put(v, u.getHost() == null ? "" : u.getHost());
                     return false;
                 }
@@ -1117,6 +1315,11 @@ public class BrowserPanel extends android.content.ContextWrapper {
                 String h = u.getHost() == null ? "" : u.getHost();
                 current.put(v, h);
                 going.put(v, h);
+                if (timeUp(BrowserPanel.this, h)) {          // typed in, a bookmark, Back: still closed for today
+                    final String d = limitedDomain(BrowserPanel.this, h);
+                    ui.post(() -> showTimeUp(v, d));
+                    return;
+                }
                 ytAds(v, url);
                 if (v == BrowserPanel.this.web) refreshBar();
             }
@@ -1196,13 +1399,252 @@ public class BrowserPanel extends android.content.ContextWrapper {
         }).start();
     }
 
+    /* ---------------- time limits: minutes a day per website (Settings → Browser time limits). Time counts while the
+       site is on screen, or playing in the background; at the limit the page is swapped for a "time's up" page, and
+       the site stays closed until midnight. */
+    private static final int LIMIT_TICK_S = 15;
+    private static android.content.SharedPreferences limitPrefs(android.content.Context c) { return c.getSharedPreferences("sitelimits", MODE_PRIVATE); }
+    private static String today() { return new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(new java.util.Date()); }
+
+    static String cleanDomain(String s) {
+        String d = s == null ? "" : s.trim().toLowerCase(java.util.Locale.ROOT);
+        d = d.replaceFirst("^[a-z]+://", "");
+        int cut = d.indexOf('/');
+        if (cut >= 0) d = d.substring(0, cut);
+        cut = d.indexOf(':');
+        if (cut >= 0) d = d.substring(0, cut);
+        return d.replaceFirst("^(www|m|mobile)\\.", "");
+    }
+
+    /** whose limits: the profile in use on this phone (the page keeps it in sprofiles.json, or profile.json) */
+    static String limitProfile(android.content.Context c) {
+        try {
+            java.io.File f = new java.io.File(c.getFilesDir(), "sprofiles.json");
+            if (f.isFile()) {
+                Object cur = new JSONObject(new String(java.nio.file.Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8)).opt("cur");
+                if (cur != null && cur != JSONObject.NULL) return String.valueOf(cur);
+            }
+            f = new java.io.File(c.getFilesDir(), "profile.json");
+            if (f.isFile()) {
+                String s = new String(java.nio.file.Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8).trim().replace("\"", "");
+                if (!s.isEmpty() && !s.equals("null")) return s;
+            }
+        } catch (Exception ignored) { }
+        return "main";
+    }
+
+    /** each profile has its own limits (they follow the profile: kept on the computer too). The ones from before
+     *  profiles had limits go to the first profile that asks. */
+    static JSONObject limits(android.content.Context c) {
+        android.content.SharedPreferences p = limitPrefs(c);
+        String key = "limits:" + limitProfile(c);
+        if (!p.contains(key) && p.contains("limits")) p.edit().putString(key, p.getString("limits", "{}")).remove("limits").apply();
+        try { return new JSONObject(p.getString(key, "{}")); } catch (Exception e) { return new JSONObject(); }
+    }
+
+    /** a profile's whole list at once (from the computer) */
+    static void setAllLimits(android.content.Context c, String json) {
+        try {
+            JSONObject in = new JSONObject(json), l = new JSONObject();
+            java.util.Iterator<String> it = in.keys();
+            while (it.hasNext()) { String k = it.next(), d = cleanDomain(k); int m = in.optInt(k, 0); if (!d.isEmpty() && m > 0) l.put(d, m); }
+            limitPrefs(c).edit().putString("limits:" + limitProfile(c), l.toString()).remove("limits").apply();
+        } catch (Exception ignored) { }
+    }
+
+    /** minutes 0 takes the limit off */
+    static void setLimit(android.content.Context c, String site, int minutes) {
+        String d = cleanDomain(site);
+        if (d.isEmpty()) return;
+        JSONObject l = limits(c);
+        try { if (minutes > 0) l.put(d, minutes); else l.remove(d); } catch (Exception ignored) { }
+        limitPrefs(c).edit().putString("limits:" + limitProfile(c), l.toString()).apply();
+    }
+
+    /** the limited site a host belongs to (youtube.com covers m.youtube.com), or null */
+    static String limitedDomain(android.content.Context c, String host) {
+        if (host == null || host.isEmpty()) return null;
+        String h = host.toLowerCase(java.util.Locale.ROOT);
+        java.util.Iterator<String> it = limits(c).keys();
+        while (it.hasNext()) {
+            String d = it.next();
+            if (h.equals(d) || h.endsWith("." + d)) return d;
+        }
+        return null;
+    }
+
+    private static String usedKey(android.content.Context c, String d) { return "u:" + limitProfile(c) + ":" + today() + ":" + d; }
+    static int usedSeconds(android.content.Context c, String d) { return limitPrefs(c).getInt(usedKey(c, d), 0); }
+
+    static boolean timeUp(android.content.Context c, String host) {
+        String d = limitedDomain(c, host);
+        return d != null && usedSeconds(c, d) >= limits(c).optInt(d, 0) * 60;
+    }
+
+    /** {limits:{site:minutes}, used:{site:seconds today}} for Settings */
+    static String limitsJson(android.content.Context c) {
+        JSONObject l = limits(c), used = new JSONObject(), out = new JSONObject();
+        try {
+            java.util.Iterator<String> it = l.keys();
+            while (it.hasNext()) { String d = it.next(); used.put(d, usedSeconds(c, d)); }
+            out.put("limits", l);
+            out.put("used", used);
+        } catch (Exception ignored) { }
+        return out.toString();
+    }
+
+    private String limitHtml(String d) {
+        int min = limits(this).optInt(d, 0);
+        String amount = min >= 60 && min % 60 == 0 ? (min / 60) + (min == 60 ? " hour" : " hours") : min + " minutes";
+        return "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><title>Time's up</title>"
+                + "<body style='margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#1d1a17;color:#efe6d8;font:17px/1.5 Georgia,serif;text-align:center'>"
+                + "<div style='padding:28px;max-width:420px'><div style='font-size:54px'>&#8987;</div>"
+                + "<h1 style='font-weight:normal;margin:.3em 0'>Time's up for " + android.text.Html.escapeHtml(d) + "</h1>"
+                + "<p>You've used your " + amount + " for today. It opens again at midnight.</p>"
+                + "<p style='opacity:.6;font-size:14px'>Change the limit in Babel's Settings &rarr; Browser time limits.</p></div>";
+    }
+
+    private void showTimeUp(WebView w, String d) {
+        w.evaluateJavascript("document.querySelectorAll('video,audio').forEach(function(m){try{m.pause()}catch(e){}})", null);
+        w.stopLoading();
+        w.loadDataWithBaseURL("https://babel.invalid/limit", limitHtml(d), "text/html", "utf-8", null);
+    }
+
+    private final Runnable limitTick = new Runnable() {
+        @Override public void run() {
+            boolean onScreen = resumed && view() != null && view().getVisibility() == View.VISIBLE;
+            if (onScreen || wasPlaying) {
+                java.util.Set<String> counted = new java.util.HashSet<>();
+                for (WebView w : new WebView[]{webA, webB}) {
+                    if (w == null) continue;
+                    String d = limitedDomain(BrowserPanel.this, current.get(w));
+                    if (d == null) continue;
+                    if (counted.add(d)) {
+                        String key = usedKey(BrowserPanel.this, d);
+                        limitPrefs(BrowserPanel.this).edit().putInt(key, usedSeconds(BrowserPanel.this, d) + LIMIT_TICK_S).apply();
+                    }
+                    if (timeUp(BrowserPanel.this, current.get(w))) showTimeUp(w, d);
+                }
+            }
+            ui.postDelayed(this, LIMIT_TICK_S * 1000L);
+        }
+    };
+
+    /* ---------------- downloads */
+    private void download(WebView v, String url, String ua, String disposition, String mime) {
+        String name = fileName(url, disposition, mime);
+        if (url.startsWith("blob:") || url.startsWith("data:")) {
+            // the page's own link usually carries the real name in its download="" attribute
+            String js = "(function(){var n=" + JSONObject.quote(name) + ";try{var a=[].slice.call(document.querySelectorAll('a[download]')).filter(function(x){return x.href==" + JSONObject.quote(url) + "})[0];"
+                    + "if(a&&a.getAttribute('download'))n=a.getAttribute('download')}catch(e){}"
+                    + "fetch(" + JSONObject.quote(url) + ").then(function(r){return r.blob()}).then(function(b){"
+                    + "if(b.size>200*1024*1024){BabelSaver.failed('too big');return}var f=new FileReader();f.onload=function(){BabelSaver.save(f.result,n)};"
+                    + "f.onerror=function(){BabelSaver.failed('unreadable')};f.readAsDataURL(b)}).catch(function(e){BabelSaver.failed(String(e))})})()";
+            v.evaluateJavascript(js, null);
+            toast("Saving " + name + "…");
+            return;
+        }
+        if (!url.startsWith("http://") && !url.startsWith("https://")) { toast("That download can't be saved"); return; }
+        try {
+            android.app.DownloadManager.Request q = new android.app.DownloadManager.Request(Uri.parse(url));
+            String cookies = CookieManager.getInstance().getCookie(url);
+            if (cookies != null) q.addRequestHeader("Cookie", cookies);
+            q.addRequestHeader("User-Agent", ua != null && !ua.isEmpty() ? ua : v.getSettings().getUserAgentString());
+            if (v.getUrl() != null && v.getUrl().startsWith("http")) q.addRequestHeader("Referer", v.getUrl());
+            String type = typeOf(name, mime);
+            if (type != null) q.setMimeType(type);
+            q.setTitle(name);
+            q.setDescription("Babel's Library browser");
+            q.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            q.setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, name);
+            ((android.app.DownloadManager) getSystemService(DOWNLOAD_SERVICE)).enqueue(q);
+            toast("Downloading " + name + " to Downloads");
+        } catch (Exception e) { toast("Couldn't download: " + e.getMessage()); }
+    }
+    private static final String PLAIN = "application/octet-stream";
+    /** The file's real name: from the server's Content-Disposition, else the address, with an extension
+     *  added only when it has none. Android's URLUtil.guessFileName turns "x.pdf" sent as octet-stream into "x.bin". */
+    static String fileName(String url, String disposition, String mime) {
+        String name = null;
+        if (disposition != null) {
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?i)filename\\*\\s*=\\s*([^']*)'[^']*'([^;]+)").matcher(disposition);
+            if (m.find()) {
+                try { name = java.net.URLDecoder.decode(m.group(2).trim().replace("+", "%2B"), m.group(1).isEmpty() ? "UTF-8" : m.group(1)); } catch (Exception ignored) {}
+            }
+            if (name == null) {
+                m = java.util.regex.Pattern.compile("(?i)(?:^|;)\\s*filename\\s*=\\s*(\"([^\"]*)\"|[^;]+)").matcher(disposition);
+                if (m.find()) name = (m.group(2) != null ? m.group(2) : m.group(1)).trim();
+            }
+        }
+        if ((name == null || name.isEmpty()) && url != null && url.startsWith("http")) {
+            String seg = Uri.parse(url).getLastPathSegment();
+            if (seg != null && !seg.isEmpty()) name = seg;
+        }
+        if (name == null || name.trim().isEmpty()) name = "download";
+        name = name.replaceAll("[\\\\/:*?\"<>|\\x00-\\x1f]", "_").trim();
+        if (name.length() > 150) name = name.substring(name.length() - 150);
+        return withExt(name, mime);
+    }
+    /** adds an extension from the type, never replaces one the file already has */
+    static String withExt(String name, String mime) {
+        int dot = name.lastIndexOf('.');
+        if (dot > 0 && dot < name.length() - 1 && name.length() - dot <= 6) return name;
+        String m = mime == null ? "" : mime.split(";")[0].trim().toLowerCase(java.util.Locale.ROOT);
+        if (m.isEmpty() || m.equals(PLAIN)) return name;
+        String ext = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(m);
+        if (ext == null || ext.equals("bin")) return name;
+        return name + "." + ext;
+    }
+    /** a type Downloads can open the file with: the extension's, when the server only said octet-stream */
+    static String typeOf(String name, String mime) {
+        String m = mime == null ? "" : mime.split(";")[0].trim();
+        if (!m.isEmpty() && !m.equalsIgnoreCase(PLAIN)) return m;
+        int dot = name.lastIndexOf('.');
+        String t = dot > 0 ? android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substring(dot + 1).toLowerCase(java.util.Locale.ROOT)) : null;
+        return t != null ? t : (m.isEmpty() ? null : m);
+    }
+
+    /** what a page's own files (blob:, data:) are handed back through: saved to Downloads, nothing else */
+    private class Saver {
+        @android.webkit.JavascriptInterface
+        public void save(String dataUrl, String name) {
+            try {
+                int comma = dataUrl.indexOf(',');
+                String head = dataUrl.substring(0, Math.max(0, comma));
+                String mime = head.startsWith("data:") ? head.substring(5).replace(";base64", "") : "application/octet-stream";
+                byte[] raw = head.endsWith(";base64") ? android.util.Base64.decode(dataUrl.substring(comma + 1), android.util.Base64.DEFAULT)
+                        : Uri.decode(dataUrl.substring(comma + 1)).getBytes(StandardCharsets.UTF_8);
+                String safe = withExt((name == null || name.isEmpty() ? "download" : name).replaceAll("[\\\\/:*?\"<>|]", "_"), mime);
+                mime = typeOf(safe, mime);
+                if (mime == null) mime = PLAIN;
+                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    android.content.ContentValues cv = new android.content.ContentValues();
+                    cv.put(android.provider.MediaStore.Downloads.DISPLAY_NAME, safe);
+                    cv.put(android.provider.MediaStore.Downloads.MIME_TYPE, mime.isEmpty() ? "application/octet-stream" : mime);
+                    Uri u = getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+                    if (u == null) throw new java.io.IOException("no room in Downloads");
+                    try (java.io.OutputStream o = getContentResolver().openOutputStream(u)) { o.write(raw); }
+                } else {
+                    File dir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS);
+                    dir.mkdirs();
+                    try (FileOutputStream o = new FileOutputStream(new File(dir, safe))) { o.write(raw); }
+                }
+                runOnUiThread(() -> toast("Saved " + safe + " to Downloads"));
+            } catch (Exception e) { runOnUiThread(() -> toast("Couldn't save the file: " + e.getMessage())); }
+        }
+        @android.webkit.JavascriptInterface
+        public void failed(String why) { runOnUiThread(() -> toast("Couldn't save the file (" + why + ")")); }
+    }
+
     private void toast(String s) { android.widget.Toast.makeText(this, s, android.widget.Toast.LENGTH_LONG).show(); }
 
     void onResume() {
-        live = new java.lang.ref.WeakReference<>(this);
+        if (!mail) live = new java.lang.ref.WeakReference<>(this);      // (the playing notification belongs to the Browser tab's)
         resumed = true;
         ui.removeCallbacks(watchMedia);
         ui.post(watchMedia);
+        ui.removeCallbacks(limitTick);
+        ui.postDelayed(limitTick, LIMIT_TICK_S * 1000L);
     }
 
     /** An address, or words to search for on DuckDuckGo (or Wikipedia, after W). */
@@ -1231,7 +1673,7 @@ public class BrowserPanel extends android.content.ContextWrapper {
 
     /** History: one line per visit; a redirect a moment later on the same site counts as the same visit. */
     private void remember(String url, String title) {
-        if (url == null || !url.startsWith("http") || url.startsWith("https://babel.invalid/")) return;    // (the split view's picker page)
+        if (mail || url == null || !url.startsWith("http") || url.startsWith("https://babel.invalid/")) return;    // (mail isn't history; nor is the split view's picker page)
         synchronized (LOCK) {
             try {
                 File f = historyFile(this);
@@ -1272,6 +1714,7 @@ public class BrowserPanel extends android.content.ContextWrapper {
         if (fullView != null) hideFull();
         ui.removeCallbacks(tick);
         ui.removeCallbacks(watchMedia);
+        ui.removeCallbacks(limitTick);
         PlaybackService.stop(this);
         if (webA != null) webA.destroy();
         if (webB != null) webB.destroy();
