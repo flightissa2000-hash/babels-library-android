@@ -57,6 +57,7 @@ import java.util.zip.ZipFile;
  * and gives the page a bridge ("Android") for the network, downloads and files.
  */
 public class MainActivity extends Activity {
+    static final String EXTRA_RESUME = "babel_resume";
     private static final String HOST = "appassets.androidplatform.net";
     private static final String START = "https://" + HOST + "/web/index.html";
     private static final Map<String, String> MIME = new HashMap<>();
@@ -359,8 +360,26 @@ public class MainActivity extends Activity {
         if (nub != null) nub.bringToFront();
     }
     /** from a notification: a News event's page, or back to what's playing in the browser */
+    /** "Babel Resume": ask the page to open the last thing, again every half second until it's loaded and says yes
+     *  (on a cold start the page can take a few seconds) */
+    private int resumeTries;
+    private void askResume() {
+        if (web == null) return;
+        web.evaluateJavascript("(window.Native && Native.resumeLast && typeof S !== 'undefined' && S.items) ? (Native.resumeLast(), 'ok') : 'wait'", (r) -> {
+            if (r != null && r.contains("ok")) return;
+            if (++resumeTries < 40) web.postDelayed(this::askResume, 500);
+        });
+    }
+
     private void fromNotification(Intent i) {
         if (i == null) return;
+        // "Babel Resume" (the side key's double press): straight back into the last thing open
+        if (i.getBooleanExtra(EXTRA_RESUME, false) || (i.getComponent() != null && i.getComponent().getClassName().endsWith(".Resume"))) {
+            i.removeExtra(EXTRA_RESUME);            // (once: not again when the screen turns)
+            resumeTries = 0;
+            askResume();
+            return;
+        }
         // Babel as the home screen: the Home button brings up the Bulletin
         if (Intent.ACTION_MAIN.equals(i.getAction()) && i.hasCategory(Intent.CATEGORY_HOME)) {
             js("window.Native && Native.homeButton && Native.homeButton()");

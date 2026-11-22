@@ -111,7 +111,7 @@ const Journal = (() => {
         ${scoring === String(l.id) ? `<div class="jn-score">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `<button data-jscore="${n}" data-jid="${id}" class="${+l.score === n ? "on" : ""}">${n}</button>`).join("")}${l.score != null ? `<button data-jscore="" data-jid="${id}">✕</button>` : ""}</div>` : ""}</div></div>`;
   }
   function renderNow(v) {
-    const mine = S.log.filter((l) => l.kind !== "writing");
+    const mine = S.log.filter((l) => l.kind !== "writing" && inJournal(l));
     const by = (k) => mine.filter((l) => statusOf(l) === k).sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
     const now = by("reading"), next = by("next");
     const kinds = new Set(now.map((l) => l.kind));
@@ -133,13 +133,13 @@ const Journal = (() => {
   function render(v) {
     if (PAGE === "now") return renderNow(v);
     const words = S.jq.toLowerCase().split(/\s+/).filter(Boolean);
-    const kinds = KIND_ORDER.filter((k) => S.log.some((l) => inBook(l) && l.kind === k));
+    const kinds = KIND_ORDER.filter((k) => S.log.some((l) => inBook(l) && inJournal(l) && l.kind === k));
     if (!W() && S.jkind !== "all" && !kinds.includes(S.jkind)) S.jkind = "all";
-    const rows = S.log.filter((l) => inBook(l) && (W() || ((S.jkind === "all" || l.kind === S.jkind) && (S.jstatus === "all" || statusOf(l) === S.jstatus))) && words.every((w) => String(l.title).toLowerCase().includes(w)))
+    const rows = S.log.filter((l) => inBook(l) && inJournal(l) && (W() || ((S.jkind === "all" || l.kind === S.jkind) && (S.jstatus === "all" || statusOf(l) === S.jstatus))) && words.every((w) => String(l.title).toLowerCase().includes(w)))
       // reading now first, then the most recently finished, then the rest (the writing notebook: last written in first)
       .sort((a, b) => (W() ? 0 : key(b).localeCompare(key(a))) || (b.updated_at || 0) - (a.updated_at || 0));
     const year = new Date().getFullYear();
-    const done = S.log.filter((l) => String(l.finished || "").startsWith(year));
+    const done = S.log.filter((l) => inJournal(l) && String(l.finished || "").startsWith(year));
     let html = "", cur = "";
     for (const l of rows.slice(0, S.limit)) {
       const g = W() ? "Pages" : l.finished ? new Date(l.finished + "T12:00:00").toLocaleDateString([], { month: "long", year: "numeric" }) : statusOf(l) === "reading" ? (S.jkind === "all" ? "In progress" : `${stName("reading", S.jkind)} now`) : "No date";

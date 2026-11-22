@@ -32,7 +32,7 @@
     if (!list.length) return `<p class="qp-none">No notifications.</p>`;
     return `${list.some((n) => n.clear) ? `<button class="linkish qp-clearall" data-qp-clearall type="button">Clear all</button>` : ""}<div class="qp-list">${list.map((n) => `<div class="qp-n">
         <button class="qp-nb" data-qp-open="${esc(n.key)}" type="button"><img alt="" src="/pkgicon?p=${encodeURIComponent(n.pkg)}" onerror="this.remove()"><span><small>${esc(n.app)} · ${esc(ago(n.when))}</small><b>${esc(n.title)}</b>${n.text ? `<em>${esc(n.text.slice(0, 160))}</em>` : ""}</span></button>
-        ${n.clear ? `<button class="qp-x" data-qp-clear="${esc(n.key)}" type="button" aria-label="Clear">✕</button>` : ""}</div>`).join("")}</div>`;
+        <button class="qp-x" data-qp-clear="${esc(n.key)}" type="button" aria-label="${n.clear ? "Clear" : "Hide"}">✕</button></div>`).join("")}</div>`;
   }
   function paint(full) {
     if (!box) return;

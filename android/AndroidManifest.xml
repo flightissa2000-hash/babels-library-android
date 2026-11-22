@@ -85,6 +85,23 @@
                 <data android:mimeType="video/*" />
             </intent-filter>
         </activity>
+        <!-- a second app in the app list, "Babel Resume": opens the last thing you had open (for the side key's
+             double press: Settings, Advanced features, Side key, Double press, Open app). A real screen of its own
+             (not an alias), which hands over to the main one and closes -->
+        <activity
+            android:name=".Resume"
+            android:label="Babel Resume"
+            android:icon="@mipmap/ic_launcher"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
         <!-- sends files to the computer in the background, with progress and Cancel in the notification shade -->
         <service
             android:name=".UploadService"

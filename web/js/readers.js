@@ -41,12 +41,41 @@ Object.assign(window.Reader, (() => {
   function bar(on) { $("#reader")?.classList.toggle("calm", on === undefined ? undefined : !on); }
 
   /* where you are: kept on the item at once, sent to the computer every few seconds and when you close */
+  /* how far through an EPUB: exact once the book's locations are counted (kept for the next opening, so long books
+     don't wait again); before that, an estimate from the chapter and the page within it, never the old figure */
+  const LOCS = "epub-locs";
+  function locsKey(it) { return `${it.id}:${it.file_size || it.sha256 || ""}`; }
+  function loadLocs(book, it) {
+    try { const all = JSON.parse(localStorage.getItem(LOCS) || "{}"), x = all[locsKey(it)]; if (x) { book.locations.load(x); return true; } } catch (e) {}
+    return false;
+  }
+  function countLocs(book, it) {
+    return book.ready.then(() => loadLocs(book, it) || book.locations.generate(1200).then(() => {
+      try {
+        const all = JSON.parse(localStorage.getItem(LOCS) || "{}");
+        delete all[locsKey(it)]; all[locsKey(it)] = book.locations.save();
+        const keys = Object.keys(all); for (const k of keys.slice(0, Math.max(0, keys.length - 12))) delete all[k];   // (the last 12 books)
+        localStorage.setItem(LOCS, JSON.stringify(all));
+      } catch (e) {}
+    }));
+  }
+  function epubPct(book, loc) {
+    if (book.locations.length()) return book.locations.percentageFromCfi(loc.start.cfi);
+    const n = book.spine && book.spine.length, s = loc && loc.start;
+    if (!n || !s || s.index == null) return null;
+    const d = s.displayed || {}, f = d.total > 1 ? (d.page - 1) / d.total : 0;
+    return Math.max(0, Math.min(1, (s.index + f) / n));
+  }
   function save(loc, progress) {
     if (!R) return;
     // the page it already knew (the book landing where it was opened, or drawn again on waking): nothing new to send,
     // or an old place would go out as the newest and win over where another device has read to since
-    const known = (S.items[R.it.id] || R.it).last_location;
-    if (!R.pending && String(loc) === String(known ?? "")) return paintMark();
+    const cur = S.items[R.it.id] || R.it, known = cur.last_location;
+    if (!R.pending && String(loc) === String(known ?? "")) {
+      // (the same place, but saved with no percentage: a book read before its pages were counted. Mend the figure only)
+      if (!(cur.progress > 0) && progress > 0.005 && !R.mended) { R.mended = true; change(R.it.id, { progress: Math.min(1, progress) }); }
+      return paintMark();
+    }
     if (!R.pending && Date.now() - R.at < 2500) { Object.assign(R.it, { last_location: String(loc) }); return paintMark(); }
     R.pending = { last_location: String(loc), progress: Math.max(0, Math.min(1, progress || 0)) };
     Object.assign(R.it, R.pending);
@@ -640,7 +669,7 @@ Object.assign(window.Reader, (() => {
     let ready = false;
     rend.on("relocated", (loc) => {
       R.loc = loc;
-      const pct = book.locations.length() ? book.locations.percentageFromCfi(loc.start.cfi) : null;
+      const pct = epubPct(book, loc);
       $("#rPos").textContent = [label(), pct != null ? Math.round(pct * 100) + "%" : ""].filter(Boolean).join(" · ");
       if (ready || pct != null) save(loc.start.cfi, pct ?? R.it.progress ?? 0);
       ready = true;
@@ -722,7 +751,7 @@ Object.assign(window.Reader, (() => {
       rend.getContents().forEach(watch);           // the chapter already showing
       sc.addEventListener("touchstart", onStart, { passive: true });   // and the space below a short chapter
       sc.addEventListener("touchend", onEnd, { passive: true });
-      book.ready.then(() => book.locations.generate(1200)).then(() => { if (R && rend.location) rend.emit("relocated", rend.location); }).catch(() => {});
+      countLocs(book, R.it).then(() => { if (R && rend.location) rend.emit("relocated", rend.location); }).catch(() => {});
       return;
     }
     const step = (side, swipe) => { pauseFollow(); return dirOf(side, swipe) > 0 ? rend.next() : rend.prev(); };
@@ -753,7 +782,7 @@ Object.assign(window.Reader, (() => {
       tapAt(e.clientX, e.view);
     });
     // percentages need the book's locations, worked out in the background
-    book.ready.then(() => book.locations.generate(1200)).then(() => { if (R && rend.location) rend.emit("relocated", rend.location); }).catch(() => {});
+    countLocs(book, R.it).then(() => { if (R && rend.location) rend.emit("relocated", rend.location); }).catch(() => {});
   }
   function addEpubHl(a) {
     if (!R || !R.rend || !a.locator || !a.locator.cfi || isPin(a) || isBm(a)) return;
@@ -1434,6 +1463,7 @@ Object.assign(window.Reader, (() => {
 
   return {
     start, close, saveNow, follow, pageKey, lookUp,
+    current() { return R ? R.it.id : null; },
     // the computer gave a note its own number: carry on showing it as the same note
     renamed(from, to) { if (R && R.active === from) R.active = to; if (R && !$("#rSheet")?.hidden) redraw(); },
     get busy() { return !!(R && (!$("#rSheet")?.hidden || !$("#rLight")?.hidden)); },

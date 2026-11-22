@@ -309,3 +309,13 @@ html.dex .it-head{grid-template-columns:180px 1fr;gap:22px}
 .lz-t{display:flex;flex-direction:column;min-width:0}
 .lz-t b{font-size:.86rem;line-height:1.2}
 .lz-t small{font-size:.7rem;color:var(--ink-soft)}
+
+/* the corkboard layout in each theme (Galaxy's is in galaxy-phone.css) */
+html[data-theme=wordtown] .ll-cork{background:#bfe7ff radial-gradient(rgba(34,48,74,.2) 1.4px,transparent 1.9px) 0 0/18px 18px;box-shadow:inset 0 0 0 7px #ffc93c,inset 0 0 0 10px #22304a}
+html[data-theme=wordtown] .ll .lc-tape{background:#ffc93c;color:#22304a;box-shadow:0 0 0 2px #22304a,0 3px 0 #22304a;border-radius:4px}
+html[data-theme=wordtown] .ll .lc-pol{color:#22304a;border-radius:5px;box-shadow:0 0 0 2px #22304a,0 4px 0 #22304a}
+html[data-theme=gruvbox] .ll-cork{background:#32302f radial-gradient(rgba(235,219,178,.07) 1px,transparent 1.5px) 0 0/7px 7px;box-shadow:inset 0 0 0 8px #504945,inset 0 0 0 10px #1d2021}
+html[data-theme=gruvbox] .ll .lc-tape{background:#d79921;color:#282828}
+html[data-theme=gruvbox] .ll .lc-pol{background:#fbf1c7;color:#282828;box-shadow:0 5px 14px rgba(0,0,0,.55)}
+html[data-theme=galaxy] .ll .lc-tape{background:rgba(155,140,255,.85);color:#fff}
+html[data-theme=galaxy] .ll .lc-pol{background:#f4f3ff;box-shadow:0 0 0 1px rgba(155,140,255,.35),0 6px 16px rgba(0,0,0,.6)}

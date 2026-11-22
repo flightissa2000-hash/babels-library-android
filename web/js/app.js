@@ -527,6 +527,12 @@ const Ann = {
   switched() { this._mine = null; },
 };
 
+/* papers and news articles keep their Finished / Up next marks on their own pages, but aren't part of the journal
+   (its Log, its Now page or the year's count) */
+function inJournal(l) {
+  const k = l.item_kind || (l.item_id && S.items[l.item_id] && S.items[l.item_id].kind);
+  return k !== "article";
+}
 /* ---------------------------------------------------------------- sync */
 let syncP = null;
 function sync(force) {
@@ -1216,7 +1222,7 @@ const Bulletin = (() => {
   function html() {
     const wk = weekStart();
     const c = challenge(), it = c && S.items[c.id];
-    const when = new Date(wk * 1000).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+    const when = new Date().toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
     const issue = Math.max(1, Math.round((wk - Date.UTC(2026, 0, 5) / 1000) / (7 * DAY)) + 1);
     const ch = it ? { it, c, ok: done(c, it), p: pct(it), finish: c.type === "finish", start: c.type === "start", ago: Math.round((now() - finishedAt(it)) / (30 * DAY)) } : null;
     const hook = (x) => x.ok ? (x.finish ? "Done and dusted. Challenge complete." : "Revisited. Challenge complete.")
@@ -1227,7 +1233,6 @@ const Bulletin = (() => {
     return `<div class="btm">
       <section class="btm-cover ${ch && ch.ok ? "done" : ""}">${ch ? `<div class="btm-bg">${cover(ch.it, false)}</div>` : ""}<div class="btm-sheen"></div>
         <div class="btm-title"><b>BABEL</b><span><i>Issue ${issue}</i><i>${esc(when)}</i></span></div>
-        <div class="btm-ribbon">EXCLUSIVE</div>
         ${ch ? `<div class="btm-burst">${ch.ok ? "DONE!" : ch.finish ? `${ch.p}%<small>there</small>` : ch.start ? "NEW!" : "AGAIN?"}</div>
         <div class="btm-hero" data-item="${ch.it.id}">${cover(ch.it, false)}${ch.ok ? `<span class="bt-stamp">✓<b>Done!</b></span>` : ""}</div>
         <div class="btm-lines"><small>${ch.finish ? `THIS ${word().toUpperCase()}'S CHALLENGE` : ch.start ? "THE DEBUT ISSUE" : "THE REVISIT ISSUE"}</small><em>${head(ch)}</em><h2>${esc(W.title(ch.it))}</h2>
@@ -1365,7 +1370,7 @@ window.Widget = (() => {
         has_cover: !!o.has_cover, cover_v: String(o.cover_v || 0), color: colorFor(o) };
     });
     const yr = new Date().getFullYear(), since = new Date(yr, 0, 1).getTime() / 1000;
-    const doneYr = Prof.isMain() ? S.log.filter((l) => l.finished && Date.parse(l.finished) / 1000 >= since).length
+    const doneYr = Prof.isMain() ? S.log.filter((l) => l.finished && inJournal(l) && Date.parse(l.finished) / 1000 >= since).length
       : all.filter((x) => (x.watched_at || 0) >= since).length;
     const going = all.filter((x) => x.has_file && x.kind !== "music" && !isCopy(x) && W.status(x)[0] === "now").length, here = all.filter((x) => !isCopy(x) && hereAny(x)).length;
     const stats = [going && `📖 ${going} reading`, `✓ ${doneYr} finished in ${yr}`, here && `📱 ${here} on phone`].filter(Boolean).join("  ·  ");
@@ -1595,6 +1600,15 @@ async function uploadPrivacy() {
   return a == null ? null : a === "private";
 }
 window.Native = window.Native || {};
+// "Babel Resume" (the side key's double press): the last thing opened, opened again (fetched first if it isn't on
+// this phone). Waits a moment for the library on a cold start.
+Native.resumeLast = (tries = 0) => {
+  // (songs aren't it: they play in the jukebox, and the point is the book or film you were in the middle of)
+  const last = Object.values(S.items).filter((it) => it.opened_at && it.kind !== "music").sort((a, b) => b.opened_at - a.opened_at)[0];
+  if (!last) { if (tries < 10) setTimeout(() => Native.resumeLast(tries + 1), 500); else setTab("home"); return; }
+  if (Reader.open && Reader.current() === last.id) return;
+  hereAny(last) ? readHere(last) : openSheet(last.id);
+};
 // (files shared into the app from another app: the phone asks the same question, then they go)
 window.Native.askUploadPrivacy = () => uploadPrivacy().then((p) => A.sharedPrivacy(p == null ? "cancel" : p ? "private" : "public"));
 /* files already on the phone: looked through for ones in the library (Android: a folder; iPhone: picked files) */

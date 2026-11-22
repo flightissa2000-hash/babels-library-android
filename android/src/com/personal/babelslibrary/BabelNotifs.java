@@ -47,6 +47,7 @@ public class BabelNotifs extends NotificationListenerService {
                 CharSequence title = e.getCharSequence(Notification.EXTRA_TITLE), text = e.getCharSequence(Notification.EXTRA_BIG_TEXT);
                 if (text == null) text = e.getCharSequence(Notification.EXTRA_TEXT);
                 if (title == null && text == null) continue;
+                if (hidden(c, sbn.getKey(), title, text)) continue;
                 String app;
                 try { app = pm.getApplicationLabel(pm.getApplicationInfo(sbn.getPackageName(), 0)).toString(); } catch (Exception x) { app = sbn.getPackageName(); }
                 out.put(new JSONObject().put("key", sbn.getKey()).put("pkg", sbn.getPackageName()).put("app", app)
@@ -80,8 +81,33 @@ public class BabelNotifs extends NotificationListenerService {
         } catch (PendingIntent.CanceledException e) { return false; }
     }
 
+    /**
+     * Clear it. Some apps mark a notification as one other apps can't clear (Android refuses the cancel):
+     * those are snoozed for a day where Android allows it, and hidden from Babel's list until they say something new.
+     */
     static void clear(String key) {
         BabelNotifs n = live;
-        if (n != null) try { n.cancelNotification(key); } catch (Exception ignored) { }
+        if (n == null) return;
+        StatusBarNotification s = find(key);
+        if (s == null || s.isClearable()) { try { n.cancelNotification(key); } catch (Exception ignored) { } return; }
+        Bundle e = s.getNotification().extras;
+        CharSequence text = e.getCharSequence(Notification.EXTRA_BIG_TEXT);
+        if (text == null) text = e.getCharSequence(Notification.EXTRA_TEXT);
+        android.content.SharedPreferences p = n.getSharedPreferences("notifs_hidden", MODE_PRIVATE);
+        android.content.SharedPreferences.Editor ed = p.edit();
+        // forget hidden keys that are no longer showing, so the list doesn't grow
+        java.util.Set<String> showing = new java.util.HashSet<>();
+        try { for (StatusBarNotification x : n.getActiveNotifications()) showing.add(x.getKey()); } catch (Exception ignored) { }
+        for (String k : p.getAll().keySet()) if (!showing.contains(k)) ed.remove(k);
+        ed.putString(key, sig(e.getCharSequence(Notification.EXTRA_TITLE), text)).apply();
+        if (Build.VERSION.SDK_INT >= 26) try { n.snoozeNotification(key, 24L * 3600 * 1000); } catch (Exception ignored) { }
+        MainActivity.notifsChanged();
+    }
+
+    private static String sig(CharSequence title, CharSequence text) { return (title == null ? "" : title) + "\n" + (text == null ? "" : text); }
+
+    private static boolean hidden(Context c, String key, CharSequence title, CharSequence text) {
+        String h = c.getSharedPreferences("notifs_hidden", MODE_PRIVATE).getString(key, null);
+        return h != null && h.equals(sig(title, text));
     }
 }
